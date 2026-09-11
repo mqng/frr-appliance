@@ -5,7 +5,7 @@ apt-get update
 apt-get install -y --no-install-recommends \
   ca-certificates curl debian-keyring gnupg gpgv jq \
   qemu-system-x86 qemu-utils ovmf \
-  xorriso gzip zstd python3 coreutils util-linux \
+  xorriso gzip cpio zstd python3 coreutils util-linux \
   libguestfs-tools file
 rm -rf /var/lib/apt/lists/*
 

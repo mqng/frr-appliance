@@ -20,11 +20,21 @@ xorriso -osirrox on -indev "$DEBIAN_ISO_PATH" \
   -extract /install.amd/vmlinuz "$workdir/vmlinuz" \
   -extract /install.amd/initrd.gz "$workdir/initrd.gz" >/dev/null 2>&1
 
+(
+  cd "$workdir/http"
+  printf '%s\n' preseed.cfg | cpio --quiet -H newc -o | gzip -c
+) > "$workdir/preseed-initrd.gz"
+cat "$workdir/initrd.gz" "$workdir/preseed-initrd.gz" > "$workdir/initrd-custom.gz"
+
 qemu-img create -f qcow2 "$workdir/$name.qcow2" "${DISK_SIZE:-4G}"
 
 python3 -m http.server 8080 --bind 0.0.0.0 --directory "$workdir/http" >"$workdir/http.log" 2>&1 &
 http_pid=$!
-trap 'kill "$http_pid" 2>/dev/null || true' EXIT
+cleanup() {
+  kill "$http_pid" 2>/dev/null || true
+  [[ -n "${tail_pid:-}" ]] && kill "$tail_pid" 2>/dev/null || true
+}
+trap cleanup EXIT
 sleep 1
 
 accel=${QEMU_ACCEL:-tcg}
@@ -37,8 +47,8 @@ qemu_args=(
   -netdev user,id=n0
   -device virtio-net-pci,netdev=n0
   -kernel "$workdir/vmlinuz"
-  -initrd "$workdir/initrd.gz"
-  -append "auto=true priority=critical interface=auto netcfg/choose_interface=auto preseed/url=http://10.0.2.2:8080/preseed.cfg console=ttyS0,115200n8 DEBIAN_FRONTEND=text"
+  -initrd "$workdir/initrd-custom.gz"
+  -append "auto=true priority=critical locale=en_US.UTF-8 keyboard-configuration/xkb-keymap=us hostname=frr-router domain=local interface=auto netcfg/choose_interface=auto console=ttyS0,115200n8 DEBIAN_FRONTEND=text"
   -nographic
   -no-reboot
 )
@@ -46,13 +56,38 @@ if [[ "$accel" == tcg ]]; then
   qemu_args+=( -cpu max )
 fi
 
+install_log="$workdir/install-console.log"
+: > "$install_log"
+tail -n +1 -F "$install_log" &
+tail_pid=$!
+
 set +e
-timeout 5400 qemu-system-x86_64 "${qemu_args[@]}" 2>&1 | tee "$workdir/install-console.log"
-rc=${PIPESTATUS[0]}
+setsid timeout 5400 qemu-system-x86_64 "${qemu_args[@]}" >"$install_log" 2>&1 &
+qemu_pid=$!
+prompt_detected=0
+while kill -0 "$qemu_pid" 2>/dev/null; do
+  if grep -qE '^Prompt:|Prompt: .*for help' "$install_log"; then
+    echo "ERROR: unexpected interactive Debian Installer prompt detected" >&2
+    prompt_detected=1
+    kill -TERM -- "-$qemu_pid" 2>/dev/null || kill "$qemu_pid" 2>/dev/null || true
+    break
+  fi
+  sleep 2
+done
+wait "$qemu_pid"
+rc=$?
 set -e
+
+kill "$tail_pid" 2>/dev/null || true
+tail_pid=
+
+if [[ $prompt_detected -ne 0 ]]; then
+  tail -200 "$install_log" >&2 || true
+  exit 86
+fi
 if [[ $rc -ne 0 ]]; then
   echo "QEMU installer failed with status $rc" >&2
-  tail -200 "$workdir/install-console.log" >&2 || true
+  tail -200 "$install_log" >&2 || true
   exit "$rc"
 fi
 

@@ -30,6 +30,9 @@ variables:
       - out/*.env
       - out/SHA256SUMS
       - out/*.sigstore.json
+      - work/*/install-console.log
+      - work/*/http.log
+      - work/*/http/preseed.cfg
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
     - if: '$CI_PIPELINE_SOURCE == "web"'

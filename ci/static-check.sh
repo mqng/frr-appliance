@@ -15,4 +15,10 @@ if grep -RInE --exclude='static-check.sh' '(trusted=yes|curl[^|]*\|[[:space:]]*(
   exit 1
 fi
 
+grep -q 'media=cdrom,readonly=on' ci/build.sh || { echo 'Debian ISO is not attached to QEMU' >&2; exit 1; }
+grep -q 'initrd-custom.gz' ci/build.sh || { echo 'Preseed is not embedded into installer initrd' >&2; exit 1; }
+grep -q 'unexpected interactive Debian Installer prompt' ci/build.sh || { echo 'Installer prompt guard missing' >&2; exit 1; }
+grep -q 'debian-installer/exit/poweroff boolean true' ci/preseed.cfg || { echo 'Installer completion is not unattended' >&2; exit 1; }
+grep -q 'passwd/make-user boolean false' ci/preseed.cfg || { echo 'Installer account creation is not disabled' >&2; exit 1; }
+
 echo STATIC_CHECKS=PASS
