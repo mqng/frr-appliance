@@ -1,0 +1,2 @@
+Normal routing/interface configuration belongs in FRR through vtysh.
+Files in /etc/appliance are for OS/dataplane settings that FRR does not own.

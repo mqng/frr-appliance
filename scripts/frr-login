@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ! -e /var/lib/appliance/firstboot.done ]]; then
+  sudo /usr/local/sbin/appliance-firstboot
+fi
+
+if [[ -t 1 ]]; then
+  echo "FRR appliance. Exit vtysh for the Debian troubleshooting shell."
+fi
+/usr/bin/vtysh
+
+if [[ -t 1 ]]; then
+  echo "Debian troubleshooting shell. Type 'exit' to log out."
+fi
+exec /bin/bash -l

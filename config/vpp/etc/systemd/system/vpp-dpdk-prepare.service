@@ -1,0 +1,13 @@
+[Unit]
+Description=Prepare dynamic DPDK devices for VPP
+Before=vpp.service
+After=systemd-udev-settle.service
+Wants=systemd-udev-settle.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/vpp-dpdk-prepare
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

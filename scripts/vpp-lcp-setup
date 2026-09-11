@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+for _ in $(seq 1 60); do
+  if vppctl show version >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+vppctl show version >/dev/null
+vppctl lcp lcp-sync on
+vppctl lcp lcp-auto-subint on
+
+map=/run/appliance/vpp-ifaces.tsv
+[[ -r "$map" ]] || exit 0
+while IFS=$'\t' read -r iface pci; do
+  [[ -n "$iface" ]] || continue
+  if ! vppctl show lcp 2>/dev/null | grep -Fq "$iface"; then
+    vppctl lcp create "$iface" host-if "$iface"
+  fi
+  vppctl set interface state "$iface" up || true
+done < "$map"

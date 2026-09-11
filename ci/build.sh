@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+variant=${1:?}
+source work/base.env
+
+name="frr-appliance-${variant}-amd64"
+workdir="$PWD/work/$variant"
+outdir="$PWD/out"
+mkdir -p "$workdir/http" "$outdir"
+
+tar --sort=name --mtime='UTC 2020-01-01' --owner=0 --group=0 --numeric-owner \
+  -czf "$workdir/http/appliance-bundle.tar.gz" scripts config
+
+bundle_sha256=$(sha256sum "$workdir/http/appliance-bundle.tar.gz" | awk '{print $1}')
+sed -e "s/__VARIANT__/$variant/g" -e "s/__BUNDLE_SHA256__/$bundle_sha256/g" \
+  ci/preseed.cfg > "$workdir/http/preseed.cfg"
+
+xorriso -osirrox on -indev "$DEBIAN_ISO_PATH" \
+  -extract /install.amd/vmlinuz "$workdir/vmlinuz" \
+  -extract /install.amd/initrd.gz "$workdir/initrd.gz" >/dev/null 2>&1
+
+qemu-img create -f qcow2 "$workdir/$name.qcow2" "${DISK_SIZE:-4G}"
+
+python3 -m http.server 8080 --bind 0.0.0.0 --directory "$workdir/http" >"$workdir/http.log" 2>&1 &
+http_pid=$!
+trap 'kill "$http_pid" 2>/dev/null || true' EXIT
+sleep 1
+
+accel=${QEMU_ACCEL:-tcg}
+qemu_args=(
+  -machine q35,accel="$accel"
+  -m 3072
+  -smp 2
+  -drive "file=$workdir/$name.qcow2,format=qcow2,if=virtio,cache=writeback"
+  -netdev user,id=n0
+  -device virtio-net-pci,netdev=n0
+  -kernel "$workdir/vmlinuz"
+  -initrd "$workdir/initrd.gz"
+  -append "auto=true priority=critical interface=auto netcfg/choose_interface=auto preseed/url=http://10.0.2.2:8080/preseed.cfg console=ttyS0,115200n8 DEBIAN_FRONTEND=text"
+  -nographic
+  -no-reboot
+)
+if [[ "$accel" == tcg ]]; then
+  qemu_args+=( -cpu max )
+fi
+
+set +e
+timeout 5400 qemu-system-x86_64 "${qemu_args[@]}" 2>&1 | tee "$workdir/install-console.log"
+rc=${PIPESTATUS[0]}
+set -e
+if [[ $rc -ne 0 ]]; then
+  echo "QEMU installer failed with status $rc" >&2
+  tail -200 "$workdir/install-console.log" >&2 || true
+  exit "$rc"
+fi
+
+kill "$http_pid" 2>/dev/null || true
+trap - EXIT
+
+qemu-img convert -p -O raw -S 4k "$workdir/$name.qcow2" "$outdir/$name.img"
+cp --reflink=auto "$workdir/$name.qcow2" "$outdir/$name.qcow2"
+zstd -T0 -15 --long=27 -f "$outdir/$name.img" -o "$outdir/$name.img.zst"
+
+./ci/build-installer-iso.sh "$variant" "$DEBIAN_ISO_PATH" "$outdir/$name.img" "$outdir/$name-installer.iso"

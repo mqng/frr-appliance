@@ -1,0 +1,124 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+conf=/etc/appliance/vpp-dpdk.conf
+[[ -r "$conf" ]] && source "$conf"
+MODE=${MODE:-all}
+IOMMU_REQUIRED=${IOMMU_REQUIRED:-1}
+EXCLUDE_IFACES=${EXCLUDE_IFACES:-}
+EXCLUDE_PCI=${EXCLUDE_PCI:-}
+
+install -d -m 0755 /run/appliance
+map=/run/appliance/vpp-ifaces.tsv
+: > "$map"
+
+excluded_iface() { [[ " $EXCLUDE_IFACES " == *" $1 "* ]]; }
+excluded_pci() { [[ " $EXCLUDE_PCI " == *" $1 "* ]]; }
+
+has_iommu=0
+compgen -G '/sys/kernel/iommu_groups/*' >/dev/null && has_iommu=1
+
+selected=0
+entries=()
+if [[ "$MODE" == all ]]; then
+  for path in /sys/class/net/*; do
+    iface=${path##*/}
+    [[ "$iface" == lo ]] && continue
+    dev=$(readlink -f "$path/device" 2>/dev/null || true)
+    [[ "$dev" == /sys/devices/pci* ]] || continue
+    pci=${dev##*/}
+    [[ "$pci" =~ ^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$ ]] || continue
+    excluded_iface "$iface" && continue
+    excluded_pci "$pci" && continue
+    if [[ "$IOMMU_REQUIRED" == 1 && $has_iommu -ne 1 ]]; then
+      logger -t vpp-dpdk-prepare "IOMMU unavailable: leaving $iface ($pci) under Linux"
+      continue
+    fi
+    entries+=("$iface|$pci")
+  done
+fi
+
+modprobe vfio-pci || true
+for entry in "${entries[@]}"; do
+  iface=${entry%%|*}
+  pci=${entry##*|}
+  original_driver=""
+  if [[ -L "/sys/bus/pci/devices/$pci/driver" ]]; then
+    original_driver=$(basename "$(readlink -f "/sys/bus/pci/devices/$pci/driver")")
+  fi
+  ip link set dev "$iface" down 2>/dev/null || true
+  if [[ "$original_driver" != vfio-pci ]]; then
+    bind_ok=1
+    echo vfio-pci > "/sys/bus/pci/devices/$pci/driver_override" 2>/dev/null || bind_ok=0
+    if [[ $bind_ok -eq 1 && -n "$original_driver" ]]; then
+      echo "$pci" > "/sys/bus/pci/drivers/$original_driver/unbind" 2>/dev/null || bind_ok=0
+    fi
+    if [[ $bind_ok -eq 1 ]]; then
+      echo "$pci" > /sys/bus/pci/drivers/vfio-pci/bind 2>/dev/null || bind_ok=0
+    fi
+    if [[ $bind_ok -ne 1 ]]; then
+      logger -t vpp-dpdk-prepare "failed to bind $iface ($pci) to vfio-pci; restoring Linux driver"
+      echo '' > "/sys/bus/pci/devices/$pci/driver_override" 2>/dev/null || true
+      if [[ -n "$original_driver" && -e "/sys/bus/pci/drivers/$original_driver/bind" ]]; then
+        echo "$pci" > "/sys/bus/pci/drivers/$original_driver/bind" 2>/dev/null || true
+      fi
+      continue
+    fi
+  fi
+  printf '%s\t%s\n' "$iface" "$pci" >> "$map"
+  selected=$((selected+1))
+done
+
+workers=""
+cpus=$(nproc)
+if (( cpus > 1 )); then workers="1-$((cpus-1))"; fi
+
+cat > /run/appliance/vpp-startup.conf <<EOF2
+unix {
+  nodaemon
+  log /var/log/vpp/vpp.log
+  cli-listen /run/vpp/cli.sock
+}
+api-trace {
+  on
+  nitems 512
+}
+statseg {
+  socket-name /run/vpp/stats.sock
+}
+EOF2
+
+if [[ -n "$workers" ]]; then
+cat >> /run/appliance/vpp-startup.conf <<EOF2
+cpu {
+  main-core 0
+  corelist-workers $workers
+}
+EOF2
+fi
+
+if (( selected > 0 )); then
+  cat >> /run/appliance/vpp-startup.conf <<'EOF2'
+plugins {
+  plugin linux_cp_plugin.so { enable }
+  plugin linux_nl_plugin.so { enable }
+  plugin dpdk_plugin.so { enable }
+}
+dpdk {
+  uio-driver vfio-pci
+EOF2
+  while IFS=$'\t' read -r iface pci; do
+    printf '  dev %s { name %s }\n' "$pci" "$iface" >> /run/appliance/vpp-startup.conf
+  done < "$map"
+  echo '}' >> /run/appliance/vpp-startup.conf
+else
+  cat >> /run/appliance/vpp-startup.conf <<'EOF2'
+plugins {
+  plugin linux_cp_plugin.so { enable }
+  plugin linux_nl_plugin.so { enable }
+  plugin dpdk_plugin.so { disable }
+}
+EOF2
+fi
+
+logger -t vpp-dpdk-prepare "prepared $selected DPDK interface(s)"

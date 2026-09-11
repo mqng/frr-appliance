@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+[[ $(id -u) -eq 0 ]] || { echo "must run as root" >&2; exit 1; }
+[[ ! -e /var/lib/appliance/firstboot.done ]] || exit 0
+
+echo
+echo "FRR Appliance first boot"
+echo "------------------------"
+read -r -p "Hostname [router]: " hostname
+hostname=${hostname:-router}
+if [[ ! "$hostname" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$ ]]; then
+  echo "Invalid hostname" >&2
+  exit 1
+fi
+hostnamectl set-hostname "$hostname"
+# Keep the FRR daemon hostname and vtysh prompt aligned with the appliance hostname
+if systemctl is-active --quiet frr; then
+  vtysh -c 'configure terminal' -c "hostname $hostname" -c 'end' -c 'write memory' || true
+fi
+if grep -q '^hostname ' /etc/frr/vtysh.conf; then
+  sed -i "s/^hostname .*/hostname $hostname/" /etc/frr/vtysh.conf
+else
+  printf 'hostname %s\n' "$hostname" >> /etc/frr/vtysh.conf
+fi
+
+while true; do
+  echo "Set the admin password (minimum policy is enforced by PAM):"
+  if passwd admin; then break; fi
+done
+
+install -d -m 0755 /var/lib/appliance
+touch /var/lib/appliance/firstboot.done
+chown root:root /var/lib/appliance/firstboot.done
+chmod 0600 /var/lib/appliance/firstboot.done
+
+# Remove local-console autologin immediately after credential bootstrap
+rm -f /etc/systemd/system/getty@tty1.service.d/10-appliance-firstboot.conf
+rm -f /etc/systemd/system/serial-getty@ttyS0.service.d/10-appliance-firstboot.conf
+systemctl daemon-reload || true
+systemctl try-restart ssh.service || true
+
+echo
+echo "Bootstrap complete. Configure interfaces and routing in FRR, then 'write memory'."

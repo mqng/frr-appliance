@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ ! -s /etc/machine-id ]]; then
+  systemd-machine-id-setup
+fi
+if ! compgen -G '/etc/ssh/ssh_host_*_key' >/dev/null; then
+  ssh-keygen -A
+fi

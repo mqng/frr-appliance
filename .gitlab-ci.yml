@@ -1,0 +1,66 @@
+stages:
+  - build
+  - release
+
+variables:
+  DEBIAN_FRONTEND: noninteractive
+  DISK_SIZE: "4G"
+  QEMU_ACCEL: "tcg"
+  PUBLISH_RAW_IMG: "true"
+  PUBLISH_RELEASE: "true"
+  GIT_STRATEGY: clone
+
+.default_build:
+  stage: build
+  image: debian:13-slim
+  timeout: 3h
+  id_tokens:
+    SIGSTORE_ID_TOKEN:
+      aud: sigstore
+  before_script:
+    - ./ci/install-build-deps.sh
+  script:
+    - ./ci/pipeline.sh "$APPLIANCE_VARIANT"
+  artifacts:
+    when: always
+    expire_in: 7 days
+    paths:
+      - out/*.json
+      - out/*.txt
+      - out/*.env
+      - out/SHA256SUMS
+      - out/*.sigstore.json
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$CI_PIPELINE_SOURCE == "web"'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+
+build:vanilla:
+  extends: .default_build
+  variables:
+    APPLIANCE_VARIANT: vanilla
+  resource_group: frr-appliance-vanilla
+
+build:vpp:
+  extends: .default_build
+  variables:
+    APPLIANCE_VARIANT: vpp
+  resource_group: frr-appliance-vpp
+
+release:
+  stage: release
+  image: debian:13-slim
+  needs:
+    - job: build:vanilla
+      artifacts: false
+    - job: build:vpp
+      artifacts: false
+  before_script:
+    - apt-get update
+    - apt-get install -y --no-install-recommends ca-certificates curl jq
+  script:
+    - ./ci/create-release.sh
+  rules:
+    - if: '$PUBLISH_RELEASE == "true" && $CI_PIPELINE_SOURCE == "schedule"'
+    - if: '$PUBLISH_RELEASE == "true" && $CI_PIPELINE_SOURCE == "web"'
+    - if: '$PUBLISH_RELEASE == "true" && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'

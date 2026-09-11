@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cat /etc/appliance/build.env
+printf 'KERNEL_VERSION=%s\n' "$(uname -r)"
+printf 'FRR_RUNTIME_VERSION=%s\n' "$(vtysh -c 'show version' 2>/dev/null | head -1 || true)"
+if command -v vppctl >/dev/null 2>&1; then
+  printf 'VPP_RUNTIME_VERSION=%s\n' "$(vppctl show version 2>/dev/null | head -1 || true)"
+fi

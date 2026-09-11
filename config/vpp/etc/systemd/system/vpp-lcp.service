@@ -1,0 +1,13 @@
+[Unit]
+Description=Create VPP Linux Control Plane interface pairs
+Requires=vpp.service
+After=vpp.service
+Before=frr.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/vpp-lcp-setup
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

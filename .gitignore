@@ -1,0 +1,5 @@
+out/
+work/
+__pycache__/
+*.pyc
+*.pyo
