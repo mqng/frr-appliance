@@ -33,6 +33,7 @@ qemu_args=(
   -m 3072
   -smp 2
   -drive "file=$workdir/$name.qcow2,format=qcow2,if=virtio,cache=writeback"
+  -drive "file=$DEBIAN_ISO_PATH,format=raw,media=cdrom,readonly=on"
   -netdev user,id=n0
   -device virtio-net-pci,netdev=n0
   -kernel "$workdir/vmlinuz"
