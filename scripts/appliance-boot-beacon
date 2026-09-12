@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+port=/dev/virtio-ports/org.frr.appliance.selftest
+
+# Give udev a short window to create the virtio-serial device.
+for _ in $(seq 1 30); do
+  if [[ -w "$port" ]]; then
+    printf 'APPLIANCE_BOOT=READY\n' > "$port"
+    exit 0
+  fi
+  sleep 1
+done
+
+# No virtio test port is normal outside CI.
+exit 0
