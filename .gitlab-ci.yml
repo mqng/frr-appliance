@@ -56,9 +56,9 @@ release:
   image: debian:13-slim
   needs:
     - job: build:vanilla
-      artifacts: false
+      artifacts: true
     - job: build:vpp
-      artifacts: false
+      artifacts: true
   before_script:
     - apt-get update
     - apt-get install -y --no-install-recommends ca-certificates curl jq

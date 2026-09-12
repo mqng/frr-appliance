@@ -5,18 +5,15 @@ variant=${1:?}
 mkdir -p work/base out
 
 case "$variant" in
-  vanilla)
-    suite=trixie
-    expected_major=13
-    base_url=https://cdimage.debian.org/debian-cd/current/amd64/iso-cd
-    ;;
-  vpp)
-    suite=bookworm
-    expected_major=12
-    base_url=https://cdimage.debian.org/cdimage/archive/12.15.0/amd64/iso-cd
-    ;;
+  vanilla) suite=trixie ;;
+  vpp)     suite=bookworm ;;
   *) exit 2 ;;
 esac
+
+# The ISO only carries the installer's boot scaffolding. The appliance kernel and
+# rootfs come from $suite, so one current ISO serves both variants. Check before bumping major
+expected_major=13
+base_url=https://cdimage.debian.org/debian-cd/current/amd64/iso-cd
 
 # ISO is only the installer boot env, rootfs comes from apt
 curl --fail --location --retry 4 --retry-all-errors --proto '=https' --tlsv1.2 \

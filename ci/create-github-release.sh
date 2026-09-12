@@ -20,12 +20,28 @@ else
   tag="appliance-$version"
 fi
 
+env_value() { grep -m1 "^$2=" "$1" | cut -d= -f2-; }
+
 assets=()
 variants=()
+rows=""
 for variant in vanilla vpp; do
   name="frr-appliance-${variant}-amd64"
   [[ -f "out/$name-SHA256SUMS" ]] || continue
   variants+=("$variant")
+
+  build_env="out/$name-build.env"
+  if [[ -r "$build_env" ]]; then
+    vpp_version=$(env_value "$build_env" VPP_VERSION)
+    [[ "$vpp_version" != none ]] || vpp_version=-
+    rows+=$(printf '| %s | %s (%s) | %s | %s |\n' \
+      "$variant" \
+      "$(env_value "$build_env" DEBIAN_VERSION)" \
+      "$(env_value "$build_env" DEBIAN_CODENAME)" \
+      "$(env_value "$build_env" FRR_VERSION)" \
+      "$vpp_version")
+    rows+=$'\n'
+  fi
 
   files=(
     "$name.img.zst"
@@ -57,11 +73,11 @@ done
 notes=$(mktemp)
 trap 'rm -f "$notes"' EXIT
 cat > "$notes" <<NOTES
-FRR appliance build from [run $GITHUB_RUN_NUMBER]($run_url).
+FRR appliance build from [run $GITHUB_RUN_NUMBER]($run_url), commit \`$GITHUB_SHA\`.
 
-- Variants: ${variants[*]}
-- Commit: \`$GITHUB_SHA\`
-
+| Variant | Debian | FRR | VPP |
+| --- | --- | --- | --- |
+$rows
 Verify the checksums and signatures before use:
 
 \`\`\`

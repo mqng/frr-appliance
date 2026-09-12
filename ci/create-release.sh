@@ -11,10 +11,27 @@ fi
 tag="appliance-$version"
 api="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases"
 
+env_value() { grep -m1 "^$2=" "$1" | cut -d= -f2-; }
+
 links='[]'
+rows=""
 for variant in vanilla vpp; do
   name="frr-appliance-${variant}-amd64"
   pkg="frr-appliance-${variant}"
+
+  build_env="out/$name-build.env"
+  if [[ -r "$build_env" ]]; then
+    vpp_version=$(env_value "$build_env" VPP_VERSION)
+    [[ "$vpp_version" != none ]] || vpp_version=-
+    rows+=$(printf '| %s | %s (%s) | %s | %s |' \
+      "$variant" \
+      "$(env_value "$build_env" DEBIAN_VERSION)" \
+      "$(env_value "$build_env" DEBIAN_CODENAME)" \
+      "$(env_value "$build_env" FRR_VERSION)" \
+      "$vpp_version")
+    rows+=$'\n'
+  fi
+
   base="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/${pkg}/${version}"
   signed_files=("$name.img.zst" "$name.qcow2" "$name-installer.iso" "$name-SHA256SUMS" "$name-build-manifest.json" "$name-provenance.json" "$name-sbom.cdx.json")
   for file in "${signed_files[@]}"; do
@@ -30,10 +47,20 @@ for variant in vanilla vpp; do
   fi
 done
 
+desc=$(cat <<DESC
+FRR appliance build from $CI_PIPELINE_URL, commit $CI_COMMIT_SHA.
+
+| Variant | Debian | FRR | VPP |
+| --- | --- | --- | --- |
+$rows
+Verify SHA256SUMS and the Sigstore bundles before use.
+DESC
+)
+
 payload=$(jq -n \
   --arg tag "$tag" --arg ref "$CI_COMMIT_SHA" \
-  --arg name "FRR Appliance $version" \
-  --arg desc "FRR appliance build from $CI_PIPELINE_URL. Verify SHA256SUMS and the Sigstore bundles before use." \
+  --arg name "FRR appliance $version" \
+  --arg desc "$desc" \
   --argjson links "$links" \
   '{tag_name:$tag,ref:$ref,name:$name,description:$desc,assets:{links:$links}}')
 
