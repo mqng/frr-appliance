@@ -44,6 +44,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Static checks
         run: bash ci/static-check.sh
+      # nft needs CAP_NET_ADMIN, so it cannot live in static-check.sh
+      - name: Firewall ruleset
+        run: sudo nft --check --file config/common/etc/nftables.conf
 
   build:
     needs: lint

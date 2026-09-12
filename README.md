@@ -112,7 +112,7 @@ Build:
 ## Build
 
 Privileged Linux host, since it uses loop devices and a chroot. `make lint` needs
-`shellcheck` and `nftables`.
+`shellcheck`.
 
 ```
 make lint
