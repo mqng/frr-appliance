@@ -30,7 +30,12 @@ test -s "$mnt/etc/frr/frr.conf"
 test -s "$mnt/boot/grub/grub.cfg"
 test -s "$mnt/boot/efi/EFI/BOOT/BOOTX64.EFI"
 test -s "$mnt/boot/efi/EFI/debian/grub.cfg"
-grep -q '^LABEL=rootfs / ext4 ' "$mnt/etc/fstab"
+root_uuid=$(blkid -s UUID -o value "/dev/${base}p3")
+esp_uuid=$(blkid -s UUID -o value "/dev/${base}p2")
+grep -q "^UUID=$root_uuid / ext4 " "$mnt/etc/fstab"
+grep -q "^UUID=$esp_uuid /boot/efi vfat " "$mnt/etc/fstab"
+grep -Eq "root=UUID=${root_uuid}([[:space:]]|$)" "$mnt/boot/grub/grub.cfg"
+! grep -Eq 'root=/dev/loop[0-9]+p?[0-9]*' "$mnt/boot/grub/grub.cfg"
 grep -q 'console=ttyS0,115200n8' "$mnt/boot/grub/grub.cfg"
 chroot "$mnt" dpkg-query -W frr >/dev/null
 if [[ "$variant" == vpp ]]; then

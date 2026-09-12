@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-variant=${1:?usage: image-finalize <vanilla|vpp> <disk>}
-disk=${2:?usage: image-finalize <vanilla|vpp> <disk>}
+variant=${1:?usage: image-finalize <vanilla|vpp> <disk> <root-uuid>}
+disk=${2:?usage: image-finalize <vanilla|vpp> <disk> <root-uuid>}
+root_uuid=${3:?usage: image-finalize <vanilla|vpp> <disk> <root-uuid>}
 case "$variant" in vanilla|vpp) ;; *) exit 2 ;; esac
 [[ -b "$disk" ]] || { echo "Not a block device: $disk" >&2; exit 1; }
 
@@ -49,6 +50,19 @@ grub-install \
   --no-nvram \
   --recheck
 update-grub
+
+# The image is assembled through a temporary loop device. Never publish a GRUB
+# configuration that refers to that builder-only name.
+grep -Eq "root=UUID=${root_uuid}([[:space:]]|$)" /boot/grub/grub.cfg || {
+  echo "GRUB did not use the root filesystem UUID: $root_uuid" >&2
+  grep -E '^[[:space:]]*linux[[:space:]]' /boot/grub/grub.cfg >&2 || true
+  exit 1
+}
+if grep -Eq 'root=/dev/loop[0-9]+p?[0-9]*' /boot/grub/grub.cfg; then
+  echo 'GRUB contains a builder-only /dev/loop root device' >&2
+  grep -E '^[[:space:]]*linux[[:space:]]' /boot/grub/grub.cfg >&2 || true
+  exit 1
+fi
 
 test -s /boot/grub/grub.cfg
 test -s /boot/efi/EFI/BOOT/BOOTX64.EFI
