@@ -18,7 +18,6 @@ got=$(sha256sum "$key" | awk '{print $1}')
   exit 1
 }
 
-# patch line, not frr-stable. Bumping this is the FRR upgrade
 channel=frr-10.4
 
 cat > /etc/apt/sources.list.d/frr.sources <<APT

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# no package registry, assets go on the release. 2 GiB cap each
 
 : "${GITHUB_REPOSITORY:?}"
 : "${GITHUB_SHA:?}"
@@ -90,7 +89,6 @@ cosign verify-blob frr-appliance-vanilla-amd64.img.zst \\
 \`\`\`
 NOTES
 
-# recreate on retry
 if gh release view "$tag" >/dev/null 2>&1; then
   gh release delete "$tag" --yes --cleanup-tag
 fi

@@ -1,6 +1,5 @@
 name: appliance
 
-# mirrors .gitlab-ci.yml, same ci/*.sh scripts
 
 on:
   push:
@@ -32,7 +31,6 @@ permissions:
 env:
   DEBIAN_FRONTEND: noninteractive
   DISK_SIZE: "4G"
-  # release assets cap at 2 GiB, raw image is 4 GiB
   PUBLISH_RAW_IMG: "false"
 
 jobs:
@@ -43,7 +41,6 @@ jobs:
       - uses: actions/checkout@v4
       - name: Static checks
         run: bash ci/static-check.sh
-      # nft needs CAP_NET_ADMIN, so it cannot live in static-check.sh
       - name: Firewall ruleset
         run: sudo nft --check --file config/common/etc/nftables.conf
 
@@ -65,7 +62,6 @@ jobs:
     env:
       APPLIANCE_VARIANT: ${{ matrix.variant }}
       QEMU_ACCEL: ${{ github.event.inputs.qemu_accel || 'tcg' }}
-      # go into the build manifest and provenance
       CI_COMMIT_SHA: ${{ github.sha }}
       CI_PROJECT_URL: ${{ github.server_url }}/${{ github.repository }}
       CI_PIPELINE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -93,15 +89,12 @@ jobs:
             *) echo "unknown variant: $APPLIANCE_VARIANT" >&2; exit 2 ;;
           esac
 
-          # build.sh wants git, the slim image has none
           SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
           export SOURCE_DATE_EPOCH
 
           accel=()
           if [[ -e /dev/kvm ]]; then accel=(--device /dev/kvm); fi
 
-          # forward the OIDC endpoint, not a token: cosign signs hours later.
-          # --privileged for the loop devices and chroot
           docker run --rm --privileged "${accel[@]}" \
             --volume "$GITHUB_WORKSPACE:/build" \
             --workdir /build \
@@ -141,7 +134,6 @@ jobs:
             work/*/smoke/*.selftest
             work/base/*SUMS*
 
-      # Already compressed, so skip the artifact zip
       - name: Upload release payload
         uses: actions/upload-artifact@v4
         with:

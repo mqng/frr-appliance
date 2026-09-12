@@ -8,7 +8,6 @@ iso="$PWD/out/$name-installer.iso"
 workdir="$PWD/work/$variant/smoke"
 mkdir -p "$workdir"
 
-# ceiling, not a wait. Above the selftest deadlines
 boot_timeout=420
 if [[ "$variant" == vpp ]]; then
   boot_timeout=540
@@ -53,7 +52,6 @@ boot_wait() {
     echo "$label self-test failed" >&2
     echo '--- console ---' >&2
     tail -160 "$log" >&2 || true
-    # last, so it ends the log
     [[ -s "$result" ]] && { echo '--- result ---' >&2; cat "$result" >&2; }
     return 1
   fi
@@ -68,10 +66,8 @@ bios=(
   -display none -serial stdio -monitor none -no-reboot
 )
 boot_wait bios "${bios[@]}"
-# not first-boot-only
 boot_wait bios-reboot "${bios[@]}"
 
-# Microsoft-enrolled vars, real Secure Boot
 code=/usr/share/OVMF/OVMF_CODE_4M.ms.fd
 vars=/usr/share/OVMF/OVMF_VARS_4M.ms.fd
 [[ -r "$code" && -r "$vars" ]] || { echo 'Secure Boot OVMF firmware not found' >&2; exit 1; }
@@ -111,7 +107,6 @@ run_until() {
   }
 }
 
-# menu, media, checksum, up to the prompt
 qemu-img create -q -f qcow2 "$workdir/blank.qcow2" 5G
 installer=(
   -machine "q35,accel=${QEMU_ACCEL:-tcg}" -cpu Nehalem -m 1536 -smp 1
@@ -121,7 +116,6 @@ installer=(
 )
 run_until installer-prompt 'FRR_APPLIANCE_INSTALLER=READY' 180 "${installer[@]}"
 
-# -kernel skips the menu so the target is an arg, -no-reboot flushes the disk
 kernel="$PWD/work/$variant/installer-iso/vmlinuz"
 initrd="$PWD/work/$variant/installer-iso/installer-initrd.gz"
 [[ -r "$kernel" && -r "$initrd" ]] || { echo 'installer kernel or initrd missing' >&2; exit 1; }
@@ -141,7 +135,6 @@ grep -q 'Done, rebooting' "$write_log" || {
   exit 1
 }
 
-# bigger disk than image, so grow-root runs too
 installed=(
   -machine "q35,accel=${QEMU_ACCEL:-tcg}" -cpu Nehalem -m 2048 -smp 2
   -drive "file=$workdir/target.qcow2,format=qcow2,if=virtio"

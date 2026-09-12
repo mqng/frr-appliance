@@ -10,7 +10,6 @@ apt-get install -y --no-install-recommends \
   xorriso gzip zstd python3 coreutils file passwd shellcheck
 rm -rf /var/lib/apt/lists/*
 
-# fail before downloading a rootfs
 # shellcheck source=ci/lib/loop-image.sh
 source ci/lib/loop-image.sh
 loop_preflight

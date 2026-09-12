@@ -77,7 +77,6 @@ else
   rm -f "$autoconf"
 fi
 
-# stops autologin, see appliance-getty
 install -d -m 0755 /var/lib/appliance
 touch /var/lib/appliance/firstboot.done
 chown root:root /var/lib/appliance/firstboot.done

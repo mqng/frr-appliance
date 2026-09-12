@@ -70,7 +70,6 @@ for entry in "${entries[@]}"; do
   selected=$((selected+1))
 done
 
-# workers busy-poll, so skip them with nothing bound
 workers=""
 if (( selected > 0 )); then
   cpus=$(nproc)
@@ -82,7 +81,6 @@ unix {
   nodaemon
   log /var/log/vpp/vpp.log
   cli-listen /run/vpp/cli.sock
-  # group access for vppctl
   gid netadmin
 }
 api-trace {

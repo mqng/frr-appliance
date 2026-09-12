@@ -38,7 +38,6 @@ grep -q 'Signed-By: /etc/apt/keyrings/fdio-release.asc' scripts/install-vpp.sh |
 grep -qE '^key_sha256=[0-9a-f]{64}$' scripts/install-frr.sh || fail 'FRR key is not pinned'
 grep -qE '^key_sha256=[0-9a-f]{64}$' scripts/install-vpp.sh || fail 'VPP key is not pinned'
 grep -qE '^channel=frr-[0-9]+\.[0-9]+$' scripts/install-frr.sh || fail 'FRR must track a patch line'
-# Debian ships frr too, ours has to outrank it
 grep -q 'Pin: origin deb.frrouting.org' config/common/etc/apt/preferences.d/50-frr || fail 'FRR is not pinned to its own repo'
 ! grep -q 'apt-mark hold frr' scripts/provision-rootfs.sh || fail 'holding frr hides patch releases'
 
@@ -46,7 +45,6 @@ grep -q 'Pin: origin deb.frrouting.org' config/common/etc/apt/preferences.d/50-f
 grep -q 'nft --check --file /etc/nftables.conf' scripts/appliance-restore || fail 'restore must validate the firewall before reloading'
 ! grep -RInE --exclude='static-check.sh' 'A90FC36D|4A56C773|3D9968AC|BBC9ACA9|9CD45627' scripts ci >/dev/null || fail 'hard-coded repository signer'
 
-# frr is Before=network.target, nothing it waits on may be after
 grep -qx 'After=' config/vpp/etc/systemd/system/vpp.service.d/20-appliance.conf || fail 'vpp.service must reset After='
 ! grep -RInE --exclude='static-check.sh' '^[^#]*lsblk[^|]*PARTN' ci scripts >/dev/null || fail 'lsblk PARTN is unavailable on bookworm'
 
@@ -60,7 +58,6 @@ grep -q 'hook input priority filter; policy drop' config/common/etc/nftables.con
 grep -q 'hook forward priority filter; policy accept' config/common/etc/nftables.conf || fail 'a router must forward by default'
 grep -q 'nft --check --file /etc/nftables.conf' scripts/provision-rootfs.sh || fail 'firewall not validated at build time'
 
-# deleting a drop-in needs a daemon-reload, appliance-getty decides
 ! grep -q 'rm -f /etc/systemd/system/.*getty' scripts/appliance-firstboot || fail 'autologin must not be disabled by deleting a drop-in'
 grep -q 'firstboot.done' scripts/appliance-getty || fail 'appliance-getty must gate autologin'
 for unit in getty@tty1 serial-getty@ttyS0; do
@@ -76,7 +73,6 @@ grep -q 'org.frr.appliance.selftest' ci/smoke-test.sh || fail 'self-test channel
 grep -q "printf 'router\\\\n' > /etc/hostname" scripts/provision-rootfs.sh || fail 'default hostname not pinned'
 grep -q '^source work/base.env$' ci/finalize-artifacts.sh || fail 'base metadata not loaded'
 
-# no root= on an installer boot, must never return
 grep -q 'exec </dev/console >/dev/console 2>&1' ci/build-installer-iso.sh || fail 'installer must use /dev/console'
 ! grep -q 'appliance.console=' ci/build-installer-iso.sh || fail 'duplicate console routing'
 grep -q "trap 'fail_shell" ci/build-installer-iso.sh || fail 'installer exit trap missing'

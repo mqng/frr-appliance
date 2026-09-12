@@ -16,7 +16,6 @@ mkdir -p "$workdir"
 gzip -1 -c "$raw_img" > "$workdir/appliance.img.gz"
 sha256sum "$workdir/appliance.img.gz" | sed 's#  .*/#  #' > "$workdir/SHA256SUMS"
 
-# appended cpio breaks the ORDER files
 mnt=$(mktemp -d)
 loopdev=""
 cleanup() {
@@ -85,7 +84,6 @@ for word in $($BB cat /proc/cmdline); do
   esac
 done
 
-# also to kmsg, for whoever is on the other console
 kmsg() {
   [ -w /dev/kmsg ] || return 0
   echo "<4>frr-installer: $*" > /dev/kmsg 2>/dev/null || true
@@ -108,7 +106,6 @@ done
 [ -c /dev/console ] || halt_forever 'no /dev/console'
 exec </dev/console >/dev/console 2>&1
 
-# no root= here, so returning to init panics, and the shell can EOF
 fail_shell() {
   notify "error: $*"
   attempt=0
@@ -225,7 +222,6 @@ halt_forever 'reboot failed, power-cycle the machine'
 INSTALLER
 chmod 0755 "$conf/scripts/init-premount/appliance-installer"
 
-# more than the appliance itself boots from
 cat >> "$conf/modules" <<'MODULES'
 sr_mod
 isofs
@@ -265,12 +261,10 @@ umount "$mnt"
 losetup -d "$loopdev"
 loopdev=""
 
-# keep Debian's hybrid boot layout, replace only the menus
 xorriso -osirrox on -indev "$base_iso" \
   -extract /isolinux/txt.cfg "$workdir/txt.cfg.orig" \
   -extract /boot/grub/grub.cfg "$workdir/grub.cfg.orig" >/dev/null 2>&1
 
-# last console= takes input. VGA default, serial still sees this menu
 cat > "$workdir/txt.cfg" <<'TXT'
 default appliance-vga
 label appliance-vga
@@ -284,7 +278,6 @@ label appliance-serial
 TXT
 cat "$workdir/txt.cfg.orig" >> "$workdir/txt.cfg"
 
-# text prompt works over serial, no menu.c32 needed
 cat > "$workdir/isolinux.cfg" <<'ISOLINUX'
 serial 0 115200
 say

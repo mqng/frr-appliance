@@ -13,7 +13,6 @@ esac
 expected_major=13
 base_url=https://cdimage.debian.org/debian-cd/current/amd64/iso-cd
 
-# ISO is only the installer boot env, rootfs comes from apt
 curl --fail --location --retry 4 --retry-all-errors --proto '=https' --tlsv1.2 \
   "$base_url/SHA512SUMS" -o work/base/SHA512SUMS
 curl --fail --location --retry 4 --retry-all-errors --proto '=https' --tlsv1.2 \

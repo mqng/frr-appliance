@@ -57,13 +57,11 @@ mkdir -p "$mnt/boot/efi"
 mount "$esp" "$mnt/boot/efi"
 tar --numeric-owner --xattrs --xattrs-include='*' --acls -xf "$rootfs" -C "$mnt"
 
-# no loop device names in the image
 cat > "$mnt/etc/fstab" <<FSTAB
 UUID=$root_uuid / ext4 defaults,errors=remount-ro 0 1
 UUID=$esp_uuid /boot/efi vfat umask=0077 0 1
 FSTAB
 
-# 10_linux needs by-uuid symlinks and there is no udev here
 mkdir -p /dev/disk/by-uuid
 ln -sfn "../../${base}p3" "/dev/disk/by-uuid/$root_uuid"
 ln -sfn "../../${base}p2" "/dev/disk/by-uuid/$esp_uuid"

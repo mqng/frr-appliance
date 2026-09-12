@@ -6,7 +6,6 @@ ConditionPathExists=/dev/virtio-ports/org.frr.appliance.selftest
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/appliance-selftest
-# longer than the deadlines in appliance-selftest
 TimeoutStartSec=450
 
 [Install]

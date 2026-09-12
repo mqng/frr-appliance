@@ -4,7 +4,6 @@ variant=${1:?}
 name="frr-appliance-${variant}-amd64"
 img="$PWD/out/$name.img"
 
-# from resolve-base.sh
 source work/base.env
 
 # shellcheck source=ci/lib/loop-image.sh

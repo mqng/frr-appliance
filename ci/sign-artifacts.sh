@@ -3,7 +3,6 @@ set -euo pipefail
 variant=${1:?}
 name="frr-appliance-${variant}-amd64"
 
-# GitHub tokens expire in minutes, cosign fetches its own
 if [[ -z "${SIGSTORE_ID_TOKEN:-}" && -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]]; then
   echo 'no OIDC identity available, skipping signing' >&2
   exit 0

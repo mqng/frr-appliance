@@ -6,7 +6,6 @@ set -uo pipefail
 variant=${APPLIANCE_VARIANT:?}
 port=/dev/virtio-ports/org.frr.appliance.selftest
 
-# port only exists in CI
 for _ in $(seq 1 5); do
   [[ -w "$port" ]] && break
   modprobe virtio_console >/dev/null 2>&1 || true
@@ -20,10 +19,9 @@ fail() { emit "APPLIANCE_SELFTEST=FAIL variant=$variant check=$1"; exit 1; }
 
 detail() {
   local check=$1 text=${2//$'\n'/ | }
-  emit "APPLIANCE_SELFTEST_DETAIL variant=$variant check=$check: ${text:0:600}"
+  emit "APPLIANCE_SELFTEST_DETAIL variant=$variant check=$check: ${text:0:1200}"
 }
 
-# vtysh needs ~20 daemons up, so retry
 await() {
   local check=$1 budget=$2
   shift 2
@@ -42,7 +40,8 @@ await() {
 
 await_active() {
   local check=$1 unit=$2 budget=$3
-  local deadline
+  shift 3
+  local related=("$unit" "$@") states='' u deadline
   deadline=$(( $(date +%s) + budget ))
   while :; do
     if systemctl is-active --quiet "$unit"; then
@@ -51,7 +50,15 @@ await_active() {
     (( $(date +%s) < deadline )) || break
     sleep 1
   done
-  detail "$check" "state=$(systemctl is-active "$unit" 2>&1) result=$(systemctl show -p Result --value "$unit" 2>&1)"
+  for u in "${related[@]}"; do
+    states+=" $u=$(systemctl is-active "$u" 2>&1)/$(systemctl show -p Result --value "$u" 2>&1)"
+  done
+  detail "$check" "${states# }"
+  for u in "${related[@]}"; do
+    detail "$check-journal-$u" "$(journalctl -b --no-pager -n 12 -u "$u" 2>&1)"
+  done
+  detail "$check-transaction" "$(journalctl -b --no-pager _PID=1 2>&1 |
+    grep -iE 'ordering cycle|deleted to break|Dependency failed|Failed to start' | tail -n 8)"
   fail "$check"
 }
 
@@ -73,7 +80,7 @@ if ip route show "$testnet" | grep -q blackhole; then
 fi
 
 if [[ "$variant" == vpp ]]; then
-  await_active vpp-service vpp 60
+  await_active vpp-service vpp 60 vpp-dpdk-prepare.service vpp-lcp.service
   await vpp-cli 30 vppctl show version
 fi
 

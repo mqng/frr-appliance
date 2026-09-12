@@ -10,6 +10,7 @@ mnt=$(mktemp -d)
 loopdev=""
 cleanup() {
   set +e
+  if mountpoint -q "$mnt/proc"; then umount "$mnt/proc"; fi
   if mountpoint -q "$mnt/boot/efi"; then umount "$mnt/boot/efi"; fi
   if mountpoint -q "$mnt"; then umount "$mnt"; fi
   [[ -n "$loopdev" ]] && losetup -d "$loopdev" 2>/dev/null || true
@@ -23,6 +24,7 @@ base=$(basename "$loopdev")
 mount -o ro,noload "/dev/${base}p3" "$mnt"
 mkdir -p "$mnt/boot/efi"
 mount -o ro "/dev/${base}p2" "$mnt/boot/efi"
+mount -t proc proc "$mnt/proc"
 
 test -s "$mnt/etc/appliance/build.env"
 test -s "$mnt/etc/appliance/packages.txt"
@@ -60,4 +62,7 @@ if [[ "$variant" == vpp ]]; then
   chroot "$mnt" dpkg-query -W vpp >/dev/null
   test -s "$mnt/etc/appliance/vpp-dpdk.conf"
   grep -qx vpp <<<"$holds"
+  for unit in vpp.service vpp-dpdk-prepare.service vpp-lcp.service; do
+    chroot "$mnt" systemctl is-enabled "$unit" >/dev/null
+  done
 fi

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# container /dev is stale, make the nodes ourselves
 ensure_loop_nodes() {
   if [[ ! -e /dev/loop-control ]]; then
     mknod -m 0660 /dev/loop-control c 10 237 || {
@@ -57,7 +56,6 @@ create_partition_nodes() {
     part="${base}p${i}"
     sysdev="/sys/class/block/$part/dev"
     node="/dev/$part"
-    # stale node from an earlier attach, rebuild from sysfs
     rm -f "$node"
     for _ in $(seq 1 50); do
       if [[ -r "$sysdev" ]]; then

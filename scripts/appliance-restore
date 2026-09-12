@@ -10,10 +10,8 @@ saved=$(mktemp -d)
 archive=$(mktemp)
 trap 'rm -rf "$stage" "$saved"; rm -f "$archive"' EXIT
 
-# stdin reads once
 cat "$src" > "$archive"
 
-# a symlink member could redirect a later write, so select by name first
 wanted=()
 while IFS= read -r member; do
   case "$member" in
@@ -48,7 +46,6 @@ while IFS= read -r -d '' rel; do
   restored=$((restored + 1))
 done < <(cd "$stage" && find . -type f -printf '%P\0')
 
-# modes from the image, not the archive
 chown frr:frr /etc/frr/frr.conf /etc/frr/daemons 2>/dev/null || true
 chmod 0640 /etc/frr/frr.conf /etc/frr/daemons 2>/dev/null || true
 chown root:frrvty /etc/frr/vtysh.conf 2>/dev/null || true

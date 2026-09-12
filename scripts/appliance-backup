@@ -9,7 +9,6 @@ if [[ -z "$out" && -t 1 ]]; then
   exit 1
 fi
 
-# no password hashes, no host keys
 paths=(
   etc/hostname
   etc/hosts

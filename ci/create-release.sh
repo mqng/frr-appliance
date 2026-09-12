@@ -65,7 +65,6 @@ payload=$(jq -n \
   --argjson links "$links" \
   '{tag_name:$tag,ref:$ref,name:$name,description:$desc,assets:{links:$links}}')
 
-# recreate on retry
 status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
   --header "JOB-TOKEN: ${CI_JOB_TOKEN}" "$api/$tag")
 case "$status" in

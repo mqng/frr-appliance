@@ -10,7 +10,6 @@ outdir="$PWD/out"
 rootfs="$workdir/rootfs.tar"
 mkdir -p "$workdir" "$outdir"
 
-# cracklib-runtime and zstd are recommends, skipped otherwise
 packages=(
   systemd-sysv linux-image-amd64 initramfs-tools busybox
   grub2-common grub-pc-bin grub-efi-amd64-bin grub-efi-amd64-signed shim-signed dosfstools
@@ -26,7 +25,6 @@ export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git show -s --format=%ct HEAD 2>
 export TMPDIR="$workdir/tmp"
 mkdir -p "$TMPDIR"
 
-# root mode needs mount, so fail before downloading
 probe=$(mktemp -d)
 if ! mount -t tmpfs -o size=1m tmpfs "$probe"; then
   rmdir "$probe"

@@ -2,7 +2,6 @@
 set -euo pipefail
 
 suite=${1:?}
-# nothing newer on packagecloud
 [[ "$suite" == bookworm ]] || {
   echo "no fd.io VPP packages for $suite" >&2
   exit 1
@@ -34,7 +33,6 @@ APT
 
 apt-get update
 
-# keep the postinst off the build host's sysctls
 VPP_INSTALL_SKIP_SYSCTL=true \
   apt-get install -y --no-install-recommends \
     vpp \
