@@ -106,7 +106,7 @@ Build:
 ## Build
 
 Needs a privileged Linux host, since the image is built on loop devices and
-finished in a chroot.
+finished in a chroot. `make lint` also needs `shellcheck` and `nftables`.
 
 ```
 make lint
@@ -115,8 +115,12 @@ make build-vpp
 ```
 
 Both run `ci/pipeline.sh`: verify the Debian ISO signature, build the rootfs with
-`mmdebstrap`, assemble the disk, check it, boot it under QEMU on BIOS and UEFI
-Secure Boot, boot the installer ISO, then write metadata and signatures.
-Artifacts end up in `out/`.
+`mmdebstrap`, assemble the disk, check it offline, then under QEMU boot it on
+BIOS, boot it a second time, boot it on UEFI with Secure Boot, boot the installer
+ISO, do an unattended install to a blank disk and boot the result. Then write
+metadata and signatures. Artifacts end up in `out/`.
+
+Each boot runs an in-guest self-test that checks FRR, `vtysh`, sshd, the firewall
+and that a route configured in `vtysh` reaches the kernel.
 
 `.gitlab-ci.yml` and `.github/workflows/appliance.yml` run the same scripts.

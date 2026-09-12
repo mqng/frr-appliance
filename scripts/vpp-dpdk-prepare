@@ -2,6 +2,7 @@
 set -euo pipefail
 
 conf=/etc/appliance/vpp-dpdk.conf
+# shellcheck source=/dev/null
 [[ -r "$conf" ]] && source "$conf"
 MODE=${MODE:-all}
 IOMMU_REQUIRED=${IOMMU_REQUIRED:-1}

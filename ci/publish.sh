@@ -30,7 +30,7 @@ files=(
   "out/$name-provenance.json"
 )
 if [[ ${PUBLISH_RAW_IMG:-true} == true ]]; then files+=("out/$name.img"); fi
-for sig in out/$name*.sigstore.json; do [[ -f "$sig" ]] && files+=("$sig"); done
+for sig in out/"$name"*.sigstore.json; do [[ -f "$sig" ]] && files+=("$sig"); done
 
 for f in "${files[@]}"; do
   b=$(basename "$f")

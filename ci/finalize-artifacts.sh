@@ -30,9 +30,13 @@ losetup -d "$loopdev"
 loopdev=""
 
 set -a
+# shellcheck source=/dev/null
 source "out/$name-build.env"
 set +a
 python3 ci/make-sbom.py "out/$name-packages.txt" "out/$name-sbom.cdx.json" "$variant"
+jq -e '.bomFormat == "CycloneDX" and (.components | length) > 100
+       and all(.components[]; .name != null and .version != null and .purl != null)' \
+  "out/$name-sbom.cdx.json" >/dev/null
 
 img_sha=$(sha256sum "out/$name.img" | awk '{print $1}')
 zst_sha=$(sha256sum "out/$name.img.zst" | awk '{print $1}')

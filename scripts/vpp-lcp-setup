@@ -11,7 +11,7 @@ vppctl lcp lcp-auto-subint on
 
 map=/run/appliance/vpp-ifaces.tsv
 [[ -r "$map" ]] || exit 0
-while IFS=$'\t' read -r iface pci; do
+while IFS=$'\t' read -r iface _; do
   [[ -n "$iface" ]] || continue
   if ! vppctl show lcp 2>/dev/null | grep -Fq "$iface"; then
     vppctl lcp create "$iface" host-if "$iface"

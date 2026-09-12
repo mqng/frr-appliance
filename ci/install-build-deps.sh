@@ -7,7 +7,8 @@ apt-get install -y --no-install-recommends \
   mmdebstrap \
   parted dosfstools e2fsprogs util-linux udev \
   qemu-system-x86 qemu-utils ovmf \
-  xorriso gzip zstd python3 coreutils file passwd
+  xorriso gzip zstd python3 coreutils file passwd \
+  shellcheck nftables
 rm -rf /var/lib/apt/lists/*
 
 # fail before downloading a rootfs

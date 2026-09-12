@@ -63,11 +63,13 @@ qemu-img create -q -f qcow2 -F raw -b "$img" "$workdir/bios-overlay.qcow2"
 bios=(
   -machine "q35,accel=${QEMU_ACCEL:-tcg}" -cpu Nehalem -m 2048 -smp 2
   -drive "file=$workdir/bios-overlay.qcow2,format=qcow2,if=virtio"
-  -netdev user,id=n0
-  -device virtio-net-pci,netdev=n0
+  -netdev "user,id=n0"
+  -device "virtio-net-pci,netdev=n0"
   -display none -serial stdio -monitor none -no-reboot
 )
 boot_wait bios "${bios[@]}"
+# second boot proves grow-root and identity are not first-boot-only
+boot_wait bios-reboot "${bios[@]}"
 
 # Microsoft-enrolled vars, so this is Secure Boot and not just UEFI
 code=/usr/share/OVMF/OVMF_CODE_4M.ms.fd
@@ -80,27 +82,74 @@ uefi=(
   -drive "if=pflash,format=raw,readonly=on,file=$code"
   -drive "if=pflash,format=raw,file=$workdir/OVMF_VARS.fd"
   -drive "file=$workdir/uefi-overlay.qcow2,format=qcow2,if=virtio"
-  -netdev user,id=n0
-  -device virtio-net-pci,netdev=n0
+  -netdev "user,id=n0"
+  -device "virtio-net-pci,netdev=n0"
   -display none -serial stdio -monitor none -no-reboot
 )
 boot_wait uefi-secureboot "${uefi[@]}"
 
-# only needs to reach the prompt
-iso_log="$workdir/installer-iso.log"
+# wait for a marker in a QEMU log, then stop the guest
+run_until() {
+  local label=$1 marker=$2 limit=$3
+  shift 3
+  local log="$workdir/$label.log" pid ok=0
+  : > "$log"
+
+  qemu-system-x86_64 "$@" >"$log" 2>&1 &
+  pid=$!
+  for _ in $(seq 1 "$limit"); do
+    grep -q "$marker" "$log" && { ok=1; break; }
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+  done
+  kill "$pid" 2>/dev/null || true
+  wait "$pid" 2>/dev/null || true
+
+  [[ $ok -eq 1 ]] || {
+    echo "$label did not reach: $marker" >&2
+    tail -120 "$log" >&2 || true
+    return 1
+  }
+}
+
+# menu, media detection and checksum, up to the confirmation prompt
 qemu-img create -q -f qcow2 "$workdir/blank.qcow2" 5G
-qemu-system-x86_64 \
-  -machine "q35,accel=${QEMU_ACCEL:-tcg}" -cpu Nehalem -m 1536 -smp 1 \
-  -drive "file=$workdir/blank.qcow2,format=qcow2,if=virtio" \
-  -cdrom "$iso" -boot d -display none -serial stdio -monitor none -no-reboot \
-  >"$iso_log" 2>&1 &
-pid=$!
-ok=0
-for _ in $(seq 1 180); do
-  grep -q 'FRR_APPLIANCE_INSTALLER=READY' "$iso_log" && { ok=1; break; }
-  kill -0 "$pid" 2>/dev/null || break
-  sleep 1
-done
-kill "$pid" 2>/dev/null || true
-wait "$pid" 2>/dev/null || true
-[[ $ok -eq 1 ]] || { echo 'installer ISO did not reach the confirmation prompt' >&2; tail -120 "$iso_log" >&2; exit 1; }
+installer=(
+  -machine "q35,accel=${QEMU_ACCEL:-tcg}" -cpu Nehalem -m 1536 -smp 1
+  -drive "file=$workdir/blank.qcow2,format=qcow2,if=virtio"
+  -cdrom "$iso" -boot d
+  -display none -serial stdio -monitor none -no-reboot
+)
+run_until installer-prompt 'FRR_APPLIANCE_INSTALLER=READY' 180 "${installer[@]}"
+
+# Write the image for real. -kernel skips the menu so the target can be given on
+# the command line, and -no-reboot means the guest's own reboot ends the run with
+# the disk flushed
+kernel="$PWD/work/$variant/installer-iso/vmlinuz"
+initrd="$PWD/work/$variant/installer-iso/installer-initrd.gz"
+[[ -r "$kernel" && -r "$initrd" ]] || { echo 'installer kernel or initrd missing' >&2; exit 1; }
+qemu-img create -q -f qcow2 "$workdir/target.qcow2" 6G
+write_log="$workdir/installer-write.log"
+timeout 1800 qemu-system-x86_64 \
+  -machine "q35,accel=${QEMU_ACCEL:-tcg}" -cpu Nehalem -m 1536 -smp 2 \
+  -kernel "$kernel" -initrd "$initrd" \
+  -append 'appliance.installer=1 appliance.autoinstall=1 appliance.target=/dev/vda console=ttyS0,115200n8' \
+  -drive "file=$workdir/target.qcow2,format=qcow2,if=virtio" \
+  -cdrom "$iso" \
+  -display none -serial stdio -monitor none -no-reboot \
+  >"$write_log" 2>&1 || true
+grep -q 'Done, rebooting' "$write_log" || {
+  echo 'unattended install did not finish' >&2
+  tail -120 "$write_log" >&2 || true
+  exit 1
+}
+
+# the installed disk is larger than the image, so this also exercises grow-root
+installed=(
+  -machine "q35,accel=${QEMU_ACCEL:-tcg}" -cpu Nehalem -m 2048 -smp 2
+  -drive "file=$workdir/target.qcow2,format=qcow2,if=virtio"
+  -netdev "user,id=n0"
+  -device "virtio-net-pci,netdev=n0"
+  -display none -serial stdio -monitor none -no-reboot
+)
+boot_wait installed "${installed[@]}"

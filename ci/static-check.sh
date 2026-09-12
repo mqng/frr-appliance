@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+scripts=()
 while IFS= read -r -d '' file; do
   bash -n "$file"
+  scripts+=("$file")
 done < <(grep -rlZ '^#!/usr/bin/env bash' ci scripts)
+
+shellcheck --severity=warning --external-sources "${scripts[@]}"
+nft --check --file config/common/etc/nftables.conf
 
 python3 - <<'PY'
 from pathlib import Path

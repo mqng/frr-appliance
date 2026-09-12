@@ -23,4 +23,9 @@ if [[ ${PUBLISH_RAW_IMG:-true} == true ]]; then files+=("out/$name.img"); fi
 
 for f in "${files[@]}"; do
   cosign sign-blob "$f" --bundle "$f.sigstore.json"
+  # a bundle that cannot be verified here will not verify for anyone else
+  cosign verify-blob "$f" \
+    --bundle "$f.sigstore.json" \
+    --certificate-identity-regexp '.' \
+    --certificate-oidc-issuer-regexp '.'
 done

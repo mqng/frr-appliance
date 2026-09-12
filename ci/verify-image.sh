@@ -35,7 +35,7 @@ esp_uuid=$(blkid -s UUID -o value "/dev/${base}p2")
 grep -q "^UUID=$root_uuid / ext4 " "$mnt/etc/fstab"
 grep -q "^UUID=$esp_uuid /boot/efi vfat " "$mnt/etc/fstab"
 grep -Eq "root=UUID=${root_uuid}([[:space:]]|$)" "$mnt/boot/grub/grub.cfg"
-! grep -Eq 'root=/dev/loop[0-9]+p?[0-9]*' "$mnt/boot/grub/grub.cfg"
+grep -Eq 'root=/dev/loop[0-9]+p?[0-9]*' "$mnt/boot/grub/grub.cfg" && exit 1
 grep -q 'console=ttyS0,115200n8' "$mnt/boot/grub/grub.cfg"
 chroot "$mnt" dpkg-query -W frr >/dev/null
 chroot "$mnt" dpkg-query -W snmpd >/dev/null
@@ -49,7 +49,7 @@ for unit in ssh nftables auditd frr appliance-selftest.service \
   chroot "$mnt" systemctl is-enabled "$unit" >/dev/null
 done
 # available, not enabled
-! chroot "$mnt" systemctl is-enabled snmpd.service >/dev/null
+chroot "$mnt" systemctl is-enabled snmpd.service >/dev/null && exit 1
 if [[ "$variant" == vpp ]]; then
   chroot "$mnt" dpkg-query -W vpp >/dev/null
   test -s "$mnt/etc/appliance/vpp-dpdk.conf"

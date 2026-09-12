@@ -63,6 +63,16 @@ await frr-interface 30 vtysh -c 'show interface'
 await sshd 10 sshd -t
 await nftables 10 nft --check --file /etc/nftables.conf
 
+# a route configured in vtysh has to reach the kernel
+testnet=198.51.100.0/24
+await route-config 15 vtysh -c 'configure terminal' -c "ip route $testnet blackhole" -c 'end'
+await route-install 30 sh -c "ip route show $testnet | grep -q blackhole"
+await route-remove 15 vtysh -c 'configure terminal' -c "no ip route $testnet blackhole" -c 'end'
+if ip route show "$testnet" | grep -q blackhole; then
+  detail route-cleanup "$testnet still present after removal"
+  fail route-cleanup
+fi
+
 if [[ "$variant" == vpp ]]; then
   await_active vpp-service vpp 60
   await vpp-cli 30 vppctl show version
