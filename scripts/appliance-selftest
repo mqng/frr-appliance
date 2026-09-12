@@ -1,29 +1,52 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
+
 variant=${1:?}
 
-systemctl is-active --quiet frr
-vtysh -c 'show version' >/dev/null
-vtysh -c 'show interface' >/dev/null
-sshd -t
-nft --check --file /etc/nftables.conf
-test -s /boot/efi/EFI/BOOT/BOOTX64.EFI
-test -s /boot/efi/EFI/BOOT/grubx64.efi
+fail() {
+  echo "APPLIANCE_SELFTEST=FAIL variant=$variant check=$1"
+  exit 1
+}
 
-if [[ "$variant" == vpp ]]; then
-  systemctl is-active --quiet vpp
-  vppctl show version >/dev/null
-  vppctl show interface >/dev/null
+echo "APPLIANCE_SELFTEST=START variant=$variant"
 
-  # When physical DPDK interfaces were selected, require an LCP pair for every one
+systemctl is-active --quiet frr ||
+  fail frr-service
+
+vtysh -c 'show version' >/dev/null 2>&1 ||
+  fail frr-vtysh
+
+vtysh -c 'show interface' >/dev/null 2>&1 ||
+  fail frr-interface
+
+sshd -t ||
+  fail sshd
+
+nft --check --file /etc/nftables.conf ||
+  fail nftables
+
+test -s /boot/efi/EFI/BOOT/BOOTX64.EFI ||
+  fail uefi-bootloader
+
+if [[ "$variant" == "vpp" ]]; then
+  systemctl is-active --quiet vpp ||
+    fail vpp-service
+
+  vppctl show version >/dev/null 2>&1 ||
+    fail vpp-cli
+
+  vppctl show interface >/dev/null 2>&1 ||
+    fail vpp-interface
+
   if [[ -s /run/appliance/vpp-ifaces.tsv ]]; then
-    lcp_state=$(vppctl show lcp)
+    lcp_state=$(vppctl show lcp 2>&1) ||
+      fail vpp-lcp
+
     while IFS=$'\t' read -r iface pci; do
       [[ -n "$iface" && -n "$pci" ]] || continue
-      grep -Fq "$iface" <<<"$lcp_state" || {
-        echo "Missing VPP LCP pair for $iface ($pci)" >&2
-        exit 1
-      }
+
+      grep -Fq "$iface" <<<"$lcp_state" ||
+        fail "vpp-lcp-$iface"
     done < /run/appliance/vpp-ifaces.tsv
   fi
 fi

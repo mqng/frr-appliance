@@ -75,7 +75,7 @@ common=(
 )
 
 if [[ ${QEMU_ACCEL:-tcg} == "tcg" ]]; then
-  common+=( -cpu max )
+  common+=( -cpu max,-la57 )
 fi
 
 boot_wait bios "${common[@]}"

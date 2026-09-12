@@ -53,7 +53,7 @@ qemu_args=(
   -no-reboot
 )
 if [[ "$accel" == tcg ]]; then
-  qemu_args+=( -cpu max )
+  qemu_args+=( -cpu max,-la57 )
 fi
 
 install_log="$workdir/install-console.log"
