@@ -31,7 +31,7 @@ copy_config /tmp/config/common/etc
 if [[ "$variant" == vpp ]]; then
   copy_config /tmp/config/vpp/etc
 
-  # we reset After=, so catch new upstream ordering
+  # we reset After=, catch new upstream ordering
   vpp_unit=$(dpkg -L vpp | grep -E '/systemd/system/vpp\.service$' | head -1 || true)
   [[ -n "$vpp_unit" && -r "$vpp_unit" ]] || { echo 'packaged vpp.service not found' >&2; exit 1; }
   vpp_extra_after=$(sed -n 's/^After=//p' "$vpp_unit" | tr ' ' '\n' |
@@ -53,7 +53,8 @@ compgen -G '/var/cache/cracklib/cracklib_dict.*' >/dev/null || {
 nft --check --file /etc/nftables.conf
 
 for s in frr-login appliance-getty appliance-firstboot appliance-grow-root \
-         appliance-selftest appliance-info appliance-identity appliance-update-check; do
+         appliance-selftest appliance-info appliance-identity appliance-update-check \
+         appliance-backup appliance-restore; do
   install -m 0755 "/tmp/scripts/$s" "/usr/local/sbin/$s"
 done
 install -d -m 0755 /usr/local/libexec
@@ -160,9 +161,7 @@ ENV
 
 dpkg-query -W -f='${binary:Package}\t${Version}\n' | LC_ALL=C sort > /etc/appliance/packages.txt
 
-# FRR is deliberately not held. preferences.d/50-frr plus the pinned line mean
-# apt can only offer patch releases, and a hold would keep those from apt upgrade
-# and from the update notice. fd.io has no per-line repo, so VPP gets a hold
+# frr unheld, the pinned line only offers patches. fd.io has no line to pin
 if [[ "$variant" == vpp ]]; then
   apt-mark hold vpp vpp-plugin-core vpp-plugin-dpdk vpp-drivers >/dev/null 2>&1 || true
 fi

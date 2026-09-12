@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# container /dev is stale, so make the nodes losetup and grub want
+# container /dev is stale, make the nodes ourselves
 ensure_loop_nodes() {
   if [[ ! -e /dev/loop-control ]]; then
     mknod -m 0660 /dev/loop-control c 10 237 || {

@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+[[ $(id -u) -eq 0 ]] || { echo 'run as root' >&2; exit 1; }
+
+out=${1:-}
+if [[ -z "$out" && -t 1 ]]; then
+  echo 'usage: appliance-backup [file], or redirect stdout' >&2
+  exit 1
+fi
+
+# no password hashes, no host keys
+paths=(
+  etc/hostname
+  etc/hosts
+  etc/resolv.conf
+  etc/frr/frr.conf
+  etc/frr/vtysh.conf
+  etc/frr/daemons
+  etc/nftables.d
+  etc/chrony
+  etc/snmp/snmpd.conf
+  etc/appliance/vpp-dpdk.conf
+  etc/apt/apt.conf.d/21appliance-auto-upgrades
+)
+
+stage=$(mktemp -d)
+trap 'rm -rf "$stage"' EXIT
+
+# shellcheck source=/dev/null
+. /etc/appliance/build.env
+{
+  printf 'variant=%s\n' "$APPLIANCE_VARIANT"
+  printf 'frr_version=%s\n' "$FRR_VERSION"
+  printf 'hostname=%s\n' "$(cat /etc/hostname)"
+  printf 'created=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+} > "$stage/appliance-backup"
+
+present=()
+for p in "${paths[@]}"; do
+  [[ -e "/$p" ]] && present+=("$p")
+done
+
+tar --create --gzip \
+  --directory "$stage" appliance-backup \
+  --directory / "${present[@]}" \
+  > "${out:-/dev/stdout}"

@@ -1,6 +1,6 @@
 name: appliance
 
-# Mirrors .gitlab-ci.yml; both drive the same ci/*.sh scripts
+# mirrors .gitlab-ci.yml, same ci/*.sh scripts
 
 on:
   push:
@@ -32,11 +32,11 @@ permissions:
 env:
   DEBIAN_FRONTEND: noninteractive
   DISK_SIZE: "4G"
-  # Release assets are capped at 2 GiB and the raw image is 4 GiB
+  # release assets cap at 2 GiB, raw image is 4 GiB
   PUBLISH_RAW_IMG: "false"
 
 jobs:
-  # A build costs hours, so gate it on the checks that cost seconds
+  # gate hours of build on seconds of checks
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -63,7 +63,7 @@ jobs:
     env:
       APPLIANCE_VARIANT: ${{ matrix.variant }}
       QEMU_ACCEL: ${{ github.event.inputs.qemu_accel || 'tcg' }}
-      # finalize-artifacts.sh puts these in the build manifest and provenance
+      # go into the build manifest and provenance
       CI_COMMIT_SHA: ${{ github.sha }}
       CI_PROJECT_URL: ${{ github.server_url }}/${{ github.repository }}
       CI_PIPELINE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -85,23 +85,22 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Each variant builds on the Debian release it targets
+          # build on the release it targets
           case "$APPLIANCE_VARIANT" in
             vanilla) builder=debian:13-slim ;;
             vpp)     builder=debian:12-slim ;;
             *) echo "unknown variant: $APPLIANCE_VARIANT" >&2; exit 2 ;;
           esac
 
-          # build.sh takes this from git, which the slim builder lacks
+          # build.sh wants git, the slim image has none
           SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
           export SOURCE_DATE_EPOCH
 
           accel=()
           if [[ -e /dev/kvm ]]; then accel=(--device /dev/kvm); fi
 
-          # Forwarding ACTIONS_ID_TOKEN_REQUEST_* rather than a token lets cosign
-          # mint its own when it signs, hours after this step starts. --privileged
-          # is needed for the loop devices and chroot the build uses
+          # forward the OIDC endpoint, not a token: cosign signs hours later.
+          # --privileged for the loop devices and chroot
           docker run --rm --privileged "${accel[@]}" \
             --volume "$GITHUB_WORKSPACE:/build" \
             --workdir /build \

@@ -1,115 +1,98 @@
 # FRR appliance
 
-Debian disk images with [FRRouting](https://frrouting.org/) set up as a router.
-You configure it in `vtysh`.
-
-Two variants, amd64 only:
+Debian disk images running [FRRouting](https://frrouting.org/). Configured in
+`vtysh`.
 
 | Variant | Base | Dataplane |
 | --- | --- | --- |
 | `vanilla` | Debian 13 | kernel |
-| `vpp` | Debian 12 | [VPP](https://fd.io/) with DPDK, linked to FRR through LCP |
+| `vpp` | Debian 12 | [VPP](https://fd.io/) + DPDK, paired to FRR via LCP |
 
-`vpp` is on Debian 12 because fd.io has no trixie packages. It binds NICs to
-`vfio-pci`, so it needs an IOMMU and physical or passed-through hardware.
-
-## Versions
-
-Nothing crosses a feature release on its own. Debian comes from a frozen suite,
-so builds pick up point releases and security updates only. FRR tracks a patch
-line, `frr-10.4`, set as `channel` in `scripts/install-frr.sh` and made
-authoritative by `apt/preferences.d/50-frr`, since Debian ships an `frr` package
-of its own. VPP comes from fd.io's `release` repo, which holds the last tagged
-release for the suite.
-
-Each release lists the exact versions it was built from, so two runs can be
-compared without downloading anything.
-
-Three things stop a build on purpose:
-
-- A new Debian major, blocked by `expected_major` in `ci/resolve-base.sh`
-- A changed FRR or fd.io signing key, checked against `key_sha256` in the
-  install scripts
-- `COSIGN_VERSION` in `ci/install-build-deps.sh`, pinned with a hash
-
-Moving to a newer FRR means changing `channel` and reading their release notes.
-A patch line stops getting fixes eventually, so it is worth checking yearly.
+amd64 only. `vpp` stays on Debian 12 since fd.io has no trixie packages, and
+needs an IOMMU plus real NICs.
 
 ## Install
 
-Each build produces, per variant:
+Per variant: `*-installer.iso`, `*.img.zst`, `*.qcow2`, `*-SHA256SUMS` and
+Sigstore bundles.
 
-- `*-installer.iso`, writes the image to a disk you pick
-- `*.img.zst`, the raw image
-- `*.qcow2`, for libvirt or QEMU
-- `*-SHA256SUMS` plus Sigstore bundles
+Boot the ISO from USB or virtual media. Pick the VGA or serial entry (115200
+8N1) to match your console. It lists target disks and wants `ERASE` typed. The
+disk it booted from is not offered.
 
-### Installer ISO
+Unattended: `appliance.installer=1 appliance.autoinstall=1 appliance.target=/dev/sda`
 
-Boot it from USB or virtual media. The menu has a VGA entry and a serial entry
-(115200 8N1), pick the one for the console you are on. It lists the disks it can
-write to and asks you to type `ERASE` first. The disk it booted from is not
-offered.
-
-Unattended:
-
-```
-appliance.installer=1 appliance.autoinstall=1 appliance.target=/dev/sda
-```
-
-### Disk image
+Or write the image directly:
 
 ```
 zstd -d frr-appliance-vanilla-amd64.img.zst
-dd if=frr-appliance-vanilla-amd64.img of=/dev/sdX bs=4M status=progress conv=fsync
+dd if=frr-appliance-vanilla-amd64.img of=/dev/sdX bs=4M conv=fsync status=progress
 ```
 
 Root grows to fill the disk on first boot.
 
-### First boot
+## First boot
 
-Log in on the console. Setup asks for a hostname, an admin password, and whether
-to install security updates automatically. Until it finishes, the console logs in
-without a password and SSH does not work.
+Log in on the console. Setup asks for hostname, admin password, and whether to
+auto-install security updates. Before that the console needs no password and SSH
+does not work.
 
-After that you land in `vtysh`. `exit` leaves it for a shell. `admin` has full
-`sudo`. `appliance-info` prints the build and versions.
+Then you get `vtysh`. `exit` drops to bash. `admin` has full `sudo`.
+`appliance-info` shows build and versions.
+
+## Backup
+
+```
+ssh admin@router sudo appliance-backup > router.tgz
+ssh admin@router sudo appliance-restore < router.tgz
+```
+
+Covers FRR, `/etc/nftables.d`, hostname, hosts, resolver, chrony, snmpd,
+`vpp-dpdk.conf`, update setting. Not passwords or host keys. Restore reloads FRR
+and nftables, and refuses rules that fail `nft --check`.
 
 ## Configuration
 
-Routing goes in `vtysh`, saved with `write memory`. Every FRR daemon is enabled
-but unconfigured, so `router bgp`, `router ospf` and the rest work without
-touching `/etc/frr/daemons`.
+Routing in `vtysh`, `write memory`. All FRR daemons are enabled but
+unconfigured, so `router bgp` and friends work without editing
+`/etc/frr/daemons`.
 
-`/etc/nftables.conf` allows SSH, ICMP and every protocol FRR can start, and drops
-everything else. Forwarding is not filtered. Put your own rules in
-`/etc/nftables.d/*.nft`.
+`/etc/nftables.conf` allows SSH, ICMP and every protocol FRR can start, drops
+the rest, and does not filter forwarding. Own rules in `/etc/nftables.d/*.nft`.
 
-Serial and VGA consoles both work at 115200 8N1, from GRUB to login.
+Serial and VGA both work at 115200 8N1, GRUB through login.
 
 ## Included
 
-- Secure Boot with signed shim and GRUB
+- Secure Boot, signed shim and GRUB
 - AppArmor
-- auditd, with rules for FRR and firewall config, user and sudo changes, module
-  loading and clock changes
-- SSH: `admin` only, no root, no empty passwords, rate limited on new connections
-- Passwords: 12 characters, 3 character classes, checked against cracklib
+- auditd rules for FRR and firewall config, users, sudo, modules, clock
+- SSH: `admin` only, no root, no empty passwords, rate limited
+- Passwords: 12 characters, 3 classes, cracklib
 - Sysctl: no redirects, no source routing, no unprivileged BPF, restricted
-  `dmesg`, `kptr` and `ptrace`
-- `/tmp` on tmpfs, `nosuid` and `nodev`
-- Security updates: off by default, with a notice at login instead. Turn them on
-  at first boot or with `APT::Periodic::Unattended-Upgrade "1"`. Never reboots on
-  its own, but tells you at login when a newer kernel is waiting
-- `snmpd` installed but disabled. FRR exports MIBs over AgentX once you enable it
-- FRR takes patch releases from `apt upgrade`, and cannot leave its line. VPP is
-  held, since fd.io has no per-line repo to pin against
-- CycloneDX SBOM, package list, build manifest and SLSA provenance, all signed
-  with Sigstore
+  `dmesg`, `kptr`, `ptrace`
+- `/tmp` on tmpfs, `nosuid`, `nodev`
+- `snmpd` installed, disabled
+- CycloneDX SBOM, package list, build manifest, SLSA provenance, Sigstore signed
+
+## Versions
+
+| Component | Tracks | Set in |
+| --- | --- | --- |
+| Debian | frozen suite, point releases only | `expected_major`, `ci/resolve-base.sh` |
+| FRR | `frr-10.4` patch line | `channel`, `scripts/install-frr.sh` |
+| VPP | fd.io `release` for the suite | apt hold, no per-line repo exists |
+| cosign | sha256 | `COSIGN_VERSION`, `ci/install-build-deps.sh` |
+
+Releases list what they were built from. `apt upgrade` takes FRR patches but
+cannot leave the line, since `preferences.d/50-frr` outranks Debian's `frr`.
+
+Security updates are off by default, login notice instead, no auto reboots.
+Signing keys are checked against `key_sha256` in the install scripts.
 
 ## Options
 
-`/etc/appliance/vpp-dpdk.conf`, `vpp` variant:
+`/etc/appliance/vpp-dpdk.conf`:
 
 | Setting | Default | Effect |
 | --- | --- | --- |
@@ -122,14 +105,14 @@ Build:
 
 | Variable | Default | Effect |
 | --- | --- | --- |
-| `DISK_SIZE` | `4G` | Image size before it grows on first boot |
+| `DISK_SIZE` | `4G` | Image size before first-boot growth |
 | `QEMU_ACCEL` | `tcg` | Accelerator for the boot tests |
-| `PUBLISH_RAW_IMG` | `true` | Also publish and sign the uncompressed image |
+| `PUBLISH_RAW_IMG` | `true` | Also publish and sign the raw image |
 
 ## Build
 
-Needs a privileged Linux host, since the image is built on loop devices and
-finished in a chroot. `make lint` also needs `shellcheck` and `nftables`.
+Privileged Linux host, since it uses loop devices and a chroot. `make lint` needs
+`shellcheck` and `nftables`.
 
 ```
 make lint
@@ -137,13 +120,11 @@ make build-vanilla
 make build-vpp
 ```
 
-Both run `ci/pipeline.sh`: verify the Debian ISO signature, build the rootfs with
-`mmdebstrap`, assemble the disk, check it offline, then under QEMU boot it on
-BIOS, boot it a second time, boot it on UEFI with Secure Boot, boot the installer
-ISO, do an unattended install to a blank disk and boot the result. Then write
-metadata and signatures. Artifacts end up in `out/`.
+`ci/pipeline.sh` builds the rootfs with `mmdebstrap`, assembles the disk, then
+boots it under QEMU on BIOS, on UEFI Secure Boot, and after an unattended install
+to a blank disk. Artifacts in `out/`.
 
-Each boot runs an in-guest self-test that checks FRR, `vtysh`, sshd, the firewall
-and that a route configured in `vtysh` reaches the kernel.
+Every boot self-tests FRR, `vtysh`, sshd, the firewall, and a route from `vtysh`
+reaching the kernel.
 
-`.gitlab-ci.yml` and `.github/workflows/appliance.yml` run the same scripts.
+Same scripts run from `.gitlab-ci.yml` and `.github/workflows/appliance.yml`.

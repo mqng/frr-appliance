@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
+# ssh commands, scp and sftp arrive here
+if [[ ${1:-} == -c ]]; then
+  shift
+  exec /bin/bash -c "$*"
+fi
+
 if [[ ! -e /var/lib/appliance/firstboot.done ]]; then
   sudo /usr/local/sbin/appliance-firstboot || true
 fi

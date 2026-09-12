@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# no package registry here, so assets go on the release itself. 2 GiB cap each,
-# hence PUBLISH_RAW_IMG=false
+# no package registry, assets go on the release. 2 GiB cap each
 
 : "${GITHUB_REPOSITORY:?}"
 : "${GITHUB_SHA:?}"

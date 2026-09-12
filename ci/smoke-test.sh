@@ -8,7 +8,7 @@ iso="$PWD/out/$name-installer.iso"
 workdir="$PWD/work/$variant/smoke"
 mkdir -p "$workdir"
 
-# upper bound, not a wait. Longer than the selftest deadlines
+# ceiling, not a wait. Above the selftest deadlines
 boot_timeout=420
 if [[ "$variant" == vpp ]]; then
   boot_timeout=540
@@ -68,10 +68,10 @@ bios=(
   -display none -serial stdio -monitor none -no-reboot
 )
 boot_wait bios "${bios[@]}"
-# second boot proves grow-root and identity are not first-boot-only
+# not first-boot-only
 boot_wait bios-reboot "${bios[@]}"
 
-# Microsoft-enrolled vars, so this is Secure Boot and not just UEFI
+# Microsoft-enrolled vars, real Secure Boot
 code=/usr/share/OVMF/OVMF_CODE_4M.ms.fd
 vars=/usr/share/OVMF/OVMF_VARS_4M.ms.fd
 [[ -r "$code" && -r "$vars" ]] || { echo 'Secure Boot OVMF firmware not found' >&2; exit 1; }
@@ -88,7 +88,7 @@ uefi=(
 )
 boot_wait uefi-secureboot "${uefi[@]}"
 
-# wait for a marker in a QEMU log, then stop the guest
+# wait for a log marker, then stop the guest
 run_until() {
   local label=$1 marker=$2 limit=$3
   shift 3
@@ -112,7 +112,7 @@ run_until() {
   }
 }
 
-# menu, media detection and checksum, up to the confirmation prompt
+# menu, media, checksum, up to the prompt
 qemu-img create -q -f qcow2 "$workdir/blank.qcow2" 5G
 installer=(
   -machine "q35,accel=${QEMU_ACCEL:-tcg}" -cpu Nehalem -m 1536 -smp 1
@@ -122,9 +122,8 @@ installer=(
 )
 run_until installer-prompt 'FRR_APPLIANCE_INSTALLER=READY' 180 "${installer[@]}"
 
-# Write the image for real. -kernel skips the menu so the target can be given on
-# the command line, and -no-reboot means the guest's own reboot ends the run with
-# the disk flushed
+# real write. -kernel skips the menu so the target is an arg, -no-reboot lets
+# the guest end the run with the disk flushed
 kernel="$PWD/work/$variant/installer-iso/vmlinuz"
 initrd="$PWD/work/$variant/installer-iso/installer-initrd.gz"
 [[ -r "$kernel" && -r "$initrd" ]] || { echo 'installer kernel or initrd missing' >&2; exit 1; }
@@ -144,7 +143,7 @@ grep -q 'Done, rebooting' "$write_log" || {
   exit 1
 }
 
-# the installed disk is larger than the image, so this also exercises grow-root
+# bigger disk than image, so grow-root runs too
 installed=(
   -machine "q35,accel=${QEMU_ACCEL:-tcg}" -cpu Nehalem -m 2048 -smp 2
   -drive "file=$workdir/target.qcow2,format=qcow2,if=virtio"

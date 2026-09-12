@@ -10,8 +10,6 @@ case "$variant" in
   *) exit 2 ;;
 esac
 
-# The ISO only carries the installer's boot scaffolding. The appliance kernel and
-# rootfs come from $suite, so one current ISO serves both variants. Check before bumping major
 expected_major=13
 base_url=https://cdimage.debian.org/debian-cd/current/amd64/iso-cd
 

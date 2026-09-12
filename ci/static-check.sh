@@ -22,7 +22,7 @@ fi
 
 fail() { echo "$1" >&2; exit 1; }
 
-# real chroot on loop devices, no emulation
+# real chroot, loop devices, no emulation
 grep -q -- '--mode=root' ci/build.sh || fail 'mmdebstrap root mode missing'
 ! grep -q -- '--mode=fakechroot' ci/build.sh || fail 'fakechroot must not be used'
 grep -q -- '--format=tar' ci/build.sh || fail 'mmdebstrap tar output missing'
@@ -43,12 +43,16 @@ grep -qE '^key_sha256=[0-9a-f]{64}$' scripts/install-frr.sh || fail 'FRR key is 
 grep -qE '^key_sha256=[0-9a-f]{64}$' scripts/install-vpp.sh || fail 'VPP key is not pinned'
 # frr-stable follows feature and major releases
 grep -qE '^channel=frr-[0-9]+\.[0-9]+$' scripts/install-frr.sh || fail 'FRR must track a patch line'
-# Debian ships frr too, so the line pin only holds if the repo outranks it
+# Debian ships frr too, ours has to outrank it
 grep -q 'Pin: origin deb.frrouting.org' config/common/etc/apt/preferences.d/50-frr || fail 'FRR is not pinned to its own repo'
 ! grep -q 'apt-mark hold frr' scripts/provision-rootfs.sh || fail 'holding frr hides patch releases'
+
+# backups get copied around
+! grep -qE 'etc/(shadow|gshadow|ssh/ssh_host|sudoers)' scripts/appliance-backup || fail 'backup must not include credentials'
+grep -q 'nft --check --file /etc/nftables.conf' scripts/appliance-restore || fail 'restore must validate the firewall before reloading'
 ! grep -RInE --exclude='static-check.sh' 'A90FC36D|4A56C773|3D9968AC|BBC9ACA9|9CD45627' scripts ci >/dev/null || fail 'hard-coded repository signer'
 
-# frr is Before=network.target, so nothing it waits on may be after
+# frr is Before=network.target, nothing it waits on may be after
 grep -qx 'After=' config/vpp/etc/systemd/system/vpp.service.d/20-appliance.conf || fail 'vpp.service must reset After='
 # PARTN needs util-linux 2.40
 ! grep -RInE --exclude='static-check.sh' '^[^#]*lsblk[^|]*PARTN' ci scripts >/dev/null || fail 'lsblk PARTN is unavailable on bookworm'
@@ -65,7 +69,7 @@ grep -q 'hook input priority filter; policy drop' config/common/etc/nftables.con
 grep -q 'hook forward priority filter; policy accept' config/common/etc/nftables.conf || fail 'a router must forward by default'
 grep -q 'nft --check --file /etc/nftables.conf' scripts/provision-rootfs.sh || fail 'firewall not validated at build time'
 
-# deleting a drop-in needs a daemon-reload, so appliance-getty decides instead
+# deleting a drop-in needs a daemon-reload, appliance-getty decides
 ! grep -q 'rm -f /etc/systemd/system/.*getty' scripts/appliance-firstboot || fail 'autologin must not be disabled by deleting a drop-in'
 grep -q 'firstboot.done' scripts/appliance-getty || fail 'appliance-getty must gate autologin'
 for unit in getty@tty1 serial-getty@ttyS0; do
@@ -82,7 +86,7 @@ grep -q 'org.frr.appliance.selftest' ci/smoke-test.sh || fail 'self-test channel
 grep -q "printf 'router\\\\n' > /etc/hostname" scripts/provision-rootfs.sh || fail 'default hostname not pinned'
 grep -q '^source work/base.env$' ci/finalize-artifacts.sh || fail 'base metadata not loaded'
 
-# no root= on an installer boot, so it must never return
+# no root= on an installer boot, must never return
 grep -q 'exec </dev/console >/dev/console 2>&1' ci/build-installer-iso.sh || fail 'installer must use /dev/console'
 ! grep -q 'appliance.console=' ci/build-installer-iso.sh || fail 'duplicate console routing'
 grep -q "trap 'fail_shell" ci/build-installer-iso.sh || fail 'installer exit trap missing'

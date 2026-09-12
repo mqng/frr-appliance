@@ -10,7 +10,7 @@ outdir="$PWD/out"
 rootfs="$workdir/rootfs.tar"
 mkdir -p "$workdir" "$outdir"
 
-# cracklib-runtime and zstd are recommends, which mmdebstrap skips
+# cracklib-runtime and zstd are recommends, skipped otherwise
 packages=(
   systemd-sysv linux-image-amd64 initramfs-tools busybox
   grub2-common grub-pc-bin grub-efi-amd64-bin grub-efi-amd64-signed shim-signed dosfstools

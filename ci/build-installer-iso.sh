@@ -16,7 +16,7 @@ mkdir -p "$workdir"
 gzip -1 -c "$raw_img" > "$workdir/appliance.img.gz"
 sha256sum "$workdir/appliance.img.gz" | sed 's#  .*/#  #' > "$workdir/SHA256SUMS"
 
-# mkinitramfs, not appended cpio, keeps the ORDER files valid
+# appended cpio breaks the ORDER files
 mnt=$(mktemp -d)
 loopdev=""
 cleanup() {
@@ -109,8 +109,8 @@ done
 [ -c /dev/console ] || halt_forever 'no /dev/console'
 exec </dev/console >/dev/console 2>&1
 
-# no root= on this boot, so never return to init. The rescue shell gets EOF
-# when nothing is on the console, so it cannot be the last thing running
+# no root= here, so returning to init panics. Rescue shell gets EOF on a
+# dead console, so it cannot be last either
 fail_shell() {
   notify "error: $*"
   attempt=0
@@ -273,8 +273,7 @@ xorriso -osirrox on -indev "$base_iso" \
   -extract /isolinux/txt.cfg "$workdir/txt.cfg.orig" \
   -extract /boot/grub/grub.cfg "$workdir/grub.cfg.orig" >/dev/null 2>&1
 
-# both consoles registered either way, last console= is where input comes from.
-# VGA default: a serial operator still sees this menu, the reverse is not true
+# last console= takes input. VGA default, serial still sees this menu
 cat > "$workdir/txt.cfg" <<'TXT'
 default appliance-vga
 label appliance-vga

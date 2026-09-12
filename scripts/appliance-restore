@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+[[ $(id -u) -eq 0 ]] || { echo 'run as root' >&2; exit 1; }
+
+src=${1:-/dev/stdin}
+
+stage=$(mktemp -d)
+saved=$(mktemp -d)
+trap 'rm -rf "$stage" "$saved"' EXIT
+
+tar --extract --gzip --file "$src" --directory "$stage"
+[[ -f "$stage/appliance-backup" ]] || { echo 'not an appliance backup' >&2; exit 1; }
+
+# shellcheck source=/dev/null
+. /etc/appliance/build.env
+from=$(awk -F= '/^variant=/ { print $2 }' "$stage/appliance-backup")
+[[ "$from" == "$APPLIANCE_VARIANT" ]] ||
+  echo "note: backup came from the $from variant" >&2
+
+[[ -d /etc/nftables.d ]] && cp -a /etc/nftables.d "$saved/"
+
+restored=0
+while IFS= read -r -d '' rel; do
+  case "$rel" in
+    appliance-backup) continue ;;
+    etc/hostname|etc/hosts|etc/resolv.conf) ;;
+    etc/frr/*|etc/nftables.d/*|etc/chrony/*|etc/snmp/*|etc/appliance/*) ;;
+    etc/apt/apt.conf.d/21appliance-auto-upgrades) ;;
+    *) echo "skipping $rel" >&2; continue ;;
+  esac
+  install -D -m "$(stat -c %a "$stage/$rel")" "$stage/$rel" "/$rel"
+  restored=$((restored + 1))
+done < <(cd "$stage" && find . -type f -printf '%P\0')
+
+# from the image, not the archive
+chown frr:frr /etc/frr/frr.conf /etc/frr/daemons 2>/dev/null || true
+chmod 0640 /etc/frr/frr.conf /etc/frr/daemons 2>/dev/null || true
+chown root:frrvty /etc/frr/vtysh.conf 2>/dev/null || true
+chmod 0640 /etc/frr/vtysh.conf 2>/dev/null || true
+
+# bad rules would lock you out
+if ! nft --check --file /etc/nftables.conf; then
+  rm -f /etc/nftables.d/*.nft
+  [[ -d "$saved/nftables.d" ]] && cp -a "$saved/nftables.d/." /etc/nftables.d/
+  echo 'restored firewall rules do not load, kept the previous ones' >&2
+  exit 1
+fi
+
+printf '%s' "$(cat /etc/hostname)" > /proc/sys/kernel/hostname
+systemctl reload nftables || systemctl restart nftables
+systemctl reload frr || systemctl restart frr
+systemctl try-restart chrony || true
+
+echo "restored $restored file(s). Check 'show running-config' in vtysh."
