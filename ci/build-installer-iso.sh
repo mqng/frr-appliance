@@ -6,6 +6,9 @@ base_iso=${2:?}
 raw_img=${3:?}
 out_iso=${4:?}
 
+# shellcheck source=ci/lib/loop-image.sh
+source ci/lib/loop-image.sh
+
 workdir="$PWD/work/${variant}/installer-iso"
 rm -rf "$workdir"
 mkdir -p "$workdir"
@@ -14,16 +17,85 @@ name=$(basename "$raw_img")
 gzip -1 -c "$raw_img" > "$workdir/appliance.img.gz"
 sha256sum "$workdir/appliance.img.gz" | sed 's#  .*/#  #' > "$workdir/SHA256SUMS"
 
-cat > "$workdir/preseed-install.cfg" <<'PRESEED'
-d-i preseed/early_command string sh /cdrom/appliance/install.sh
-PRESEED
+# Reuse the finished appliance kernel and initramfs. The installer runs entirely
+# from early userspace and writes the exact appliance image carried on the ISO.
+mnt=$(mktemp -d)
+loopdev=""
+cleanup() {
+  set +e
+  mountpoint -q "$mnt" && umount "$mnt"
+  [[ -n "$loopdev" ]] && losetup -d "$loopdev" 2>/dev/null || true
+  rmdir "$mnt" 2>/dev/null || true
+}
+trap cleanup EXIT
 
-cat > "$workdir/install.sh" <<'INSTALL'
+loopdev=$(attach_loop "$raw_img" ro yes)
+create_partition_nodes "$loopdev" 3
+base=$(basename "$loopdev")
+mount -o ro "/dev/${base}p3" "$mnt"
+
+kernel=$(find "$mnt/boot" -maxdepth 1 -type f -name 'vmlinuz-*' -printf '%f\n' | sort -V | tail -1)
+[[ -n "$kernel" ]] || { echo 'No appliance kernel found' >&2; exit 1; }
+version=${kernel#vmlinuz-}
+initrd="initrd.img-${version}"
+[[ -f "$mnt/boot/$initrd" ]] || { echo "No matching appliance initramfs: $initrd" >&2; exit 1; }
+
+cp "$mnt/boot/$kernel" "$workdir/vmlinuz"
+cp "$mnt/boot/$initrd" "$workdir/installer-initrd.gz"
+umount "$mnt"
+losetup -d "$loopdev"
+loopdev=""
+
+# Add one initramfs-tools init-premount script. Linux supports concatenated
+# compressed cpio archives, so the signed Debian-generated initramfs stays intact.
+overlay="$workdir/initramfs-overlay"
+mkdir -p "$overlay/scripts/init-premount"
+cat > "$overlay/scripts/init-premount/appliance-installer" <<'INSTALLER'
 #!/bin/sh
 set -eu
 
-IMAGE=/cdrom/appliance/appliance.img.gz
-SUMS=/cdrom/appliance/SHA256SUMS
+PREREQ=""
+prereqs() { echo "$PREREQ"; }
+case "${1:-}" in
+  prereqs) prereqs; exit 0 ;;
+esac
+
+BB=/bin/busybox
+[ -x "$BB" ] || exit 1
+
+case " $($BB cat /proc/cmdline) " in
+  *' appliance.installer=1 '*) ;;
+  *) exit 0 ;;
+esac
+
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+console=ttyS0
+cmd_target=""
+autoinstall=0
+for word in $($BB cat /proc/cmdline); do
+  case "$word" in
+    appliance.console=*) console=${word#appliance.console=} ;;
+    appliance.target=*) cmd_target=${word#appliance.target=} ;;
+    appliance.autoinstall=1) autoinstall=1 ;;
+  esac
+done
+case "$console" in tty1|ttyS0) ;; *) console=ttyS0 ;; esac
+console_dev="/dev/$console"
+i=0
+while [ "$i" -lt 50 ]; do
+  [ -c "$console_dev" ] && break
+  $BB sleep 1
+  i=$((i + 1))
+done
+exec <"$console_dev" >"$console_dev" 2>&1
+
+fail_shell() {
+  echo "ERROR: $*"
+  echo "Dropping to an installer shell."
+  exec sh
+}
 
 echo
 echo "FRR Appliance installer"
@@ -31,99 +103,123 @@ echo "======================="
 echo "This writes the complete appliance image and DESTROYS the selected disk."
 echo
 
-cd /cdrom/appliance
-sha256sum -c "$SUMS"
+modprobe isofs 2>/dev/null || true
+modprobe sr_mod 2>/dev/null || true
+modprobe virtio_blk 2>/dev/null || true
+modprobe nvme 2>/dev/null || true
+udevadm settle 2>/dev/null || true
 
-cmd_target=""
-autoinstall=0
-for word in $(cat /proc/cmdline); do
-  case "$word" in
-    appliance.target=*) cmd_target=${word#appliance.target=} ;;
-    appliance.autoinstall=1) autoinstall=1 ;;
-  esac
+$BB mkdir -p /cdrom
+media=""
+i=0
+while [ "$i" -lt 60 ]; do
+  for d in /dev/sr0 /dev/sr1 /dev/cdrom /dev/sd[a-z] /dev/sd[a-z][0-9]* /dev/nvme*n*p* /dev/mmcblk*p*; do
+    [ -b "$d" ] || continue
+    if $BB mount -t iso9660 -o ro "$d" /cdrom 2>/dev/null; then
+      if [ -f /cdrom/appliance/appliance.img.gz ] && [ -f /cdrom/appliance/SHA256SUMS ]; then
+        media=$d
+        break 2
+      fi
+      $BB umount /cdrom 2>/dev/null || true
+    fi
+  done
+  $BB sleep 1
+  i=$((i + 1))
 done
+[ -n "$media" ] || fail_shell 'Installer media not found'
 
-if command -v list-devices >/dev/null 2>&1; then
-  disks=$(list-devices disk || true)
-else
-  disks=$(ls /dev/sd? /dev/vd? /dev/nvme?n1 2>/dev/null || true)
-fi
+cd /cdrom/appliance
+$BB sha256sum -c SHA256SUMS || fail_shell 'Appliance image checksum verification failed'
 
-# Never offer the device that contains the installer itself as an erase target.
-cdrom_source=$(awk '$2 == "/cdrom" { print $1; exit }' /proc/mounts)
+# If the ISO was written to USB, never offer that same disk as an erase target.
 installer_disk=""
-case "$cdrom_source" in
-  /dev/nvme*n*p[0-9]*|/dev/mmcblk*p[0-9]*) installer_disk=${cdrom_source%p[0-9]*} ;;
-  /dev/sd[a-z][0-9]*|/dev/vd[a-z][0-9]*) installer_disk=$(printf '%s' "$cdrom_source" | sed 's/[0-9][0-9]*$//') ;;
-  /dev/sd[a-z]|/dev/vd[a-z]|/dev/nvme*n[0-9]|/dev/mmcblk[0-9]*) installer_disk=$cdrom_source ;;
+case "$media" in
+  /dev/nvme*n*p[0-9]*|/dev/mmcblk*p[0-9]*) installer_disk=${media%p[0-9]*} ;;
+  /dev/sd[a-z][0-9]*) installer_disk=$(printf '%s' "$media" | $BB sed 's/[0-9][0-9]*$//') ;;
+  /dev/sd[a-z]|/dev/nvme*n[0-9]|/dev/mmcblk[0-9]*) installer_disk=$media ;;
 esac
 
-filtered_disks=""
-for d in $disks; do
+disks=""
+for sysdev in /sys/block/vd* /sys/block/sd* /sys/block/nvme*n* /sys/block/mmcblk*; do
+  [ -e "$sysdev" ] || continue
+  dev=${sysdev##*/}
+  d="/dev/$dev"
+  [ -b "$d" ] || continue
   [ -n "$installer_disk" ] && [ "$d" = "$installer_disk" ] && continue
-  filtered_disks="$filtered_disks $d"
+  disks="$disks $d"
 done
-disks=$(printf '%s\n' $filtered_disks 2>/dev/null || true)
-
-[ -n "$disks" ] || { echo "No installable disks found"; exec sh; }
+set -- $disks
+[ "$#" -gt 0 ] || fail_shell 'No installable disks found'
 
 target=$cmd_target
 if [ -z "$target" ]; then
-  count=$(printf '%s\n' $disks | wc -l)
-  if [ "$count" -eq 1 ]; then
-    target=$(printf '%s\n' $disks | head -1)
+  if [ "$#" -eq 1 ]; then
+    target=$1
   else
     echo "Available disks:"
     i=1
-    for d in $disks; do echo "  $i) $d"; i=$((i+1)); done
-    printf "Select target number: "
+    for d in "$@"; do
+      echo "  $i) $d"
+      i=$((i + 1))
+    done
+    printf 'Select target number: '
     read choice
     i=1
-    for d in $disks; do
+    for d in "$@"; do
       if [ "$i" = "$choice" ]; then target=$d; break; fi
-      i=$((i+1))
+      i=$((i + 1))
     done
   fi
 fi
 
-valid_target=0
-for d in $disks; do
-  [ "$target" = "$d" ] && valid_target=1
+valid=0
+for d in "$@"; do
+  [ "$target" = "$d" ] && valid=1
 done
-[ "$valid_target" -eq 1 ] && [ -b "$target" ] || { echo "Invalid or unsafe target: $target"; exec sh; }
+[ "$valid" -eq 1 ] && [ -b "$target" ] || fail_shell "Invalid or unsafe target: $target"
 
 echo "Target: $target"
+echo "FRR_APPLIANCE_INSTALLER=READY"
+
 if [ "$autoinstall" -ne 1 ]; then
-  printf "Type ERASE to continue: "
+  printf 'Type ERASE to continue: '
   read confirm
-  [ "$confirm" = ERASE ] || { echo "Cancelled"; exec sh; }
+  [ "$confirm" = ERASE ] || fail_shell 'Installation cancelled'
 fi
 
-swapoff -a 2>/dev/null || true
-sync
-gzip -dc "$IMAGE" | dd of="$target" bs=16M conv=fsync
-sync
+echo "Writing appliance image to $target ..."
+$BB gzip -dc appliance.img.gz | $BB dd of="$target" bs=4M
+$BB sync
+echo 'Install complete. Rebooting.'
+$BB reboot -f
+INSTALLER
+chmod 0755 "$overlay/scripts/init-premount/appliance-installer"
+(
+  cd "$overlay"
+  find . -print0 | cpio --null --quiet -o -H newc | gzip -9
+) >> "$workdir/installer-initrd.gz"
 
-echo "Install complete. Rebooting."
-reboot -f
-INSTALL
-chmod 0755 "$workdir/install.sh"
-
+# Preserve Debian's proven hybrid BIOS/UEFI boot layout, replacing only the menus
+# and adding our kernel, initramfs, and appliance payload.
 xorriso -osirrox on -indev "$base_iso" \
   -extract /isolinux/txt.cfg "$workdir/txt.cfg.orig" \
   -extract /boot/grub/grub.cfg "$workdir/grub.cfg.orig" >/dev/null 2>&1
 
 cat > "$workdir/txt.cfg" <<'TXT'
-default appliance
-label appliance
-  menu label ^Install FRR Appliance (ERASE DISK)
-  kernel /install.amd/vmlinuz
-  append auto=true priority=critical file=/cdrom/appliance/preseed-install.cfg initrd=/install.amd/initrd.gz console=tty0 console=ttyS0,115200n8 --- quiet
+default appliance-serial
+label appliance-serial
+  menu label ^Install FRR Appliance (Serial, ERASE DISK)
+  kernel /appliance/vmlinuz
+  append initrd=/appliance/installer-initrd.gz appliance.installer=1 appliance.console=ttyS0 console=tty0 console=ttyS0,115200n8
+label appliance-vga
+  menu label Install FRR Appliance (^VGA, ERASE DISK)
+  kernel /appliance/vmlinuz
+  append initrd=/appliance/installer-initrd.gz appliance.installer=1 appliance.console=tty1 console=tty0
 TXT
 cat "$workdir/txt.cfg.orig" >> "$workdir/txt.cfg"
 
 cat > "$workdir/isolinux.cfg" <<'ISOLINUX'
-default appliance
+default appliance-serial
 prompt 0
 timeout 50
 include txt.cfg
@@ -132,9 +228,13 @@ ISOLINUX
 cat > "$workdir/grub.cfg" <<'GRUB'
 set default=0
 set timeout=5
-menuentry 'Install FRR Appliance (ERASE DISK)' {
-    linux /install.amd/vmlinuz auto=true priority=critical file=/cdrom/appliance/preseed-install.cfg console=tty0 console=ttyS0,115200n8 --- quiet
-    initrd /install.amd/initrd.gz
+menuentry 'Install FRR Appliance (Serial, ERASE DISK)' {
+    linux /appliance/vmlinuz appliance.installer=1 appliance.console=ttyS0 console=tty0 console=ttyS0,115200n8
+    initrd /appliance/installer-initrd.gz
+}
+menuentry 'Install FRR Appliance (VGA, ERASE DISK)' {
+    linux /appliance/vmlinuz appliance.installer=1 appliance.console=tty1 console=tty0
+    initrd /appliance/installer-initrd.gz
 }
 GRUB
 cat "$workdir/grub.cfg.orig" >> "$workdir/grub.cfg"
@@ -151,8 +251,8 @@ xorriso \
   -volid "$volid" \
   -map "$workdir/appliance.img.gz" /appliance/appliance.img.gz \
   -map "$workdir/SHA256SUMS" /appliance/SHA256SUMS \
-  -map "$workdir/install.sh" /appliance/install.sh \
-  -map "$workdir/preseed-install.cfg" /appliance/preseed-install.cfg \
+  -map "$workdir/vmlinuz" /appliance/vmlinuz \
+  -map "$workdir/installer-initrd.gz" /appliance/installer-initrd.gz \
   -map "$workdir/txt.cfg" /isolinux/txt.cfg \
   -map "$workdir/isolinux.cfg" /isolinux/isolinux.cfg \
   -map "$workdir/grub.cfg" /boot/grub/grub.cfg \

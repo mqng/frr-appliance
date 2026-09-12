@@ -97,7 +97,7 @@ qemu-system-x86_64 \
 pid=$!
 ok=0
 for _ in $(seq 1 180); do
-  grep -q 'FRR Appliance installer' "$iso_log" && { ok=1; break; }
+  grep -q 'FRR_APPLIANCE_INSTALLER=READY' "$iso_log" && { ok=1; break; }
   kill -0 "$pid" 2>/dev/null || break
   sleep 1
 done

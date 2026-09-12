@@ -14,7 +14,7 @@ mkdir -p "$workdir" "$outdir"
 # native root mode so package maintainer scripts run in a real chroot rather
 # than through fakechroot/LD_PRELOAD emulation.
 packages=(
-  systemd-sysv linux-image-amd64 initramfs-tools
+  systemd-sysv linux-image-amd64 initramfs-tools busybox
   grub2-common grub-pc-bin grub-efi-amd64-bin grub-efi-amd64-signed shim-signed dosfstools
   openssh-server sudo ca-certificates curl gnupg
   iproute2 ethtool pciutils kmod tcpdump lsof jq less vim-tiny bash-completion
