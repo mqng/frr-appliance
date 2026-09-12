@@ -4,10 +4,10 @@ set -euo pipefail
 apt-get update
 apt-get install -y --no-install-recommends \
   ca-certificates curl debian-keyring debian-archive-keyring gnupg gpgv jq \
-  mmdebstrap fakechroot fakeroot \
+  mmdebstrap \
   libguestfs-tools qemu-system-x86 qemu-utils ovmf \
   xorriso gzip zstd python3 coreutils util-linux file \
-  uidmap passwd
+  passwd
 rm -rf /var/lib/apt/lists/*
 
 COSIGN_VERSION=${COSIGN_VERSION:-3.1.3}

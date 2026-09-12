@@ -10,8 +10,9 @@ outdir="$PWD/out"
 rootfs="$workdir/rootfs.tar"
 mkdir -p "$workdir" "$outdir"
 
-# fakechroot keeps this build usable on unprivileged GitLab SaaS Docker runners.
-# The CI image is deliberately matched to the target Debian major version.
+# GitLab.com saas-linux hosted runners are privileged. Use mmdebstrap's
+# native root mode so package maintainer scripts run in a real chroot rather
+# than through fakechroot/LD_PRELOAD emulation.
 packages=(
   systemd-sysv linux-image-amd64 initramfs-tools
   grub2-common grub-pc-bin grub-efi-amd64-bin grub-efi-amd64-signed shim-signed dosfstools
@@ -27,16 +28,19 @@ export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git show -s --format=%ct HEAD 2>
 export TMPDIR="$workdir/tmp"
 mkdir -p "$TMPDIR"
 
-# Run mmdebstrap as an unprivileged user. fakechroot+fakeroot provide the
-# filesystem ownership view without CAP_SYS_ADMIN or privileged Docker.
-id -u imagebuilder >/dev/null 2>&1 || useradd --system --create-home imagebuilder
-chown -R imagebuilder:imagebuilder "$workdir"
+# Fail immediately if the runner cannot perform the mounts required by
+# mmdebstrap root mode. GitLab.com saas-linux runners are expected to pass.
+probe=$(mktemp -d)
+if ! mount -t tmpfs -o size=1m tmpfs "$probe"; then
+  rmdir "$probe"
+  echo 'Runner lacks CAP_SYS_ADMIN; this pipeline requires a privileged GitLab hosted runner' >&2
+  exit 1
+fi
+umount "$probe"
+rmdir "$probe"
 
-runuser -u imagebuilder -- env \
-  SOURCE_DATE_EPOCH="$SOURCE_DATE_EPOCH" \
-  TMPDIR="$TMPDIR" \
-  mmdebstrap \
-  --mode=fakechroot \
+mmdebstrap \
+  --mode=root \
   --format=tar \
   --variant=minbase \
   --architectures=amd64 \

@@ -4,8 +4,7 @@ set -euo pipefail
 variant=${1:?usage: image-finalize <vanilla|vpp>}
 case "$variant" in vanilla|vpp) ;; *) exit 2 ;; esac
 
-# fakechroot intentionally cannot build every host-dependent cache correctly.
-# Rebuild them now that the rootfs is on its real disk inside libguestfs.
+# Rebuild host-dependent caches after the rootfs has been placed on its final disk.
 ldconfig
 found_kernel=0
 for modules in /lib/modules/*; do

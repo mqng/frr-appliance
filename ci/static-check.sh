@@ -15,7 +15,9 @@ if grep -RInE --exclude='static-check.sh' '(trusted=yes|curl[^|]*\|[[:space:]]*(
   exit 1
 fi
 
-grep -q -- '--mode=fakechroot' ci/build.sh || { echo 'mmdebstrap must use unprivileged fakechroot mode' >&2; exit 1; }
+grep -q -- '--mode=root' ci/build.sh || { echo 'mmdebstrap root mode missing' >&2; exit 1; }
+! grep -q -- '--mode=fakechroot' ci/build.sh || { echo 'fakechroot must not be used on GitLab hosted runners' >&2; exit 1; }
+! grep -RInE --exclude='static-check.sh' 'gpg .*--(import|export|dearmor)' scripts ci >/dev/null || { echo 'GPG agent-dependent key transforms found in build path' >&2; exit 1; }
 grep -q -- '--format=tar' ci/build.sh || { echo 'mmdebstrap tar output missing' >&2; exit 1; }
 ! grep -q 'qemu-system-' ci/build.sh || { echo 'QEMU must not be part of OS construction' >&2; exit 1; }
 grep -q 'guestfish' ci/assemble-image.sh || { echo 'Direct image assembly missing' >&2; exit 1; }

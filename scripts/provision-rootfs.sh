@@ -5,12 +5,6 @@ variant=${1:?usage: provision-rootfs.sh <vanilla|vpp>}
 case "$variant" in vanilla|vpp) ;; *) exit 2 ;; esac
 export DEBIAN_FRONTEND=noninteractive
 
-# fakechroot preserves the CI runner HOME, which does not exist inside the
-# target rootfs. Give GnuPG an explicit writable home so key inspection does
-# not depend on the runner account.
-export GNUPGHOME=/tmp/appliance-gnupg
-install -d -m 0700 "$GNUPGHOME"
-
 . /etc/os-release
 suite=${VERSION_CODENAME:?}
 
@@ -158,7 +152,7 @@ if [[ "$variant" == vpp ]]; then
 fi
 
 # Service enablement and the final initramfs are generated after the tarball is
-# placed on its real disk, inside libguestfs. This avoids fakechroot edge cases.
+# placed on its real disk so GRUB/initramfs are built against the final layout.
 
 rm -f /etc/ssh/ssh_host_* /etc/machine-id /var/lib/dbus/machine-id
 : > /etc/machine-id
