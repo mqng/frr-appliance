@@ -55,7 +55,6 @@ for unit in ssh nftables auditd frr appliance-selftest.service \
             appliance-update-check.timer tmp.mount; do
   chroot "$mnt" systemctl is-enabled "$unit" >/dev/null
 done
-# available, not enabled
 chroot "$mnt" systemctl is-enabled snmpd.service >/dev/null && exit 1
 if [[ "$variant" == vpp ]]; then
   chroot "$mnt" dpkg-query -W vpp >/dev/null

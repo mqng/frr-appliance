@@ -43,7 +43,6 @@ version=${kernel#vmlinuz-}
 [[ -d "$mnt/lib/modules/$version" ]] || { echo "no modules for kernel $version" >&2; exit 1; }
 cp "$mnt/boot/$kernel" "$workdir/vmlinuz"
 
-# appliance fs stays read-only, build state on tmpfs
 mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs "$mnt/tmp"
 mount --rbind /dev "$mnt/dev"
 mount --make-rslave "$mnt/dev"
@@ -109,8 +108,7 @@ done
 [ -c /dev/console ] || halt_forever 'no /dev/console'
 exec </dev/console >/dev/console 2>&1
 
-# no root= here, so returning to init panics. Rescue shell gets EOF on a
-# dead console, so it cannot be last either
+# no root= here, so returning to init panics, and the shell can EOF
 fail_shell() {
   notify "error: $*"
   attempt=0
@@ -162,7 +160,6 @@ done
 cd /cdrom/appliance
 $BB sha256sum -c SHA256SUMS || fail_shell 'image checksum verification failed'
 
-# skip the disk we booted from
 installer_disk=""
 case "$media" in
   /dev/nvme*n*p[0-9]*|/dev/mmcblk*p[0-9]*) installer_disk=${media%p[0-9]*} ;;

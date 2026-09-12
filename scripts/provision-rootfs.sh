@@ -55,7 +55,6 @@ compgen -G '/var/cache/cracklib/cracklib_dict.*' >/dev/null || {
   exit 1
 }
 
-# catch typos before first boot
 nft --check --file /etc/nftables.conf
 
 for s in frr-login appliance-getty appliance-firstboot appliance-grow-root \

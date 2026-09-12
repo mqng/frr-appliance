@@ -36,7 +36,6 @@ env:
   PUBLISH_RAW_IMG: "false"
 
 jobs:
-  # gate hours of build on seconds of checks
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -88,7 +87,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # build on the release it targets
           case "$APPLIANCE_VARIANT" in
             vanilla) builder=debian:13-slim ;;
             vpp)     builder=debian:12-slim ;;

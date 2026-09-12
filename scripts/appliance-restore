@@ -13,8 +13,7 @@ trap 'rm -rf "$stage" "$saved"; rm -f "$archive"' EXIT
 # stdin reads once
 cat "$src" > "$archive"
 
-# pick members before extracting, so a symlink in the archive cannot redirect a
-# later write out of the staging directory
+# a symlink member could redirect a later write, so select by name first
 wanted=()
 while IFS= read -r member; do
   case "$member" in
@@ -56,7 +55,6 @@ chown root:frrvty /etc/frr/vtysh.conf 2>/dev/null || true
 chmod 0640 /etc/frr/vtysh.conf 2>/dev/null || true
 chmod 0600 /etc/snmp/snmpd.conf 2>/dev/null || true
 
-# bad rules would lock you out
 if ! nft --check --file /etc/nftables.conf; then
   rm -f /etc/nftables.d/*.nft
   [[ -d "$saved/nftables.d" ]] && cp -a "$saved/nftables.d/." /etc/nftables.d/

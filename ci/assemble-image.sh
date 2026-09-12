@@ -32,7 +32,6 @@ rm -f "$img"
 truncate -s "$size" "$img"
 loopdev=$(attach_loop "$img" rw yes)
 
-# GPT: BIOS boot area, 512 MiB ESP, remainder ext4 root
 parted -s "$loopdev" \
   mklabel gpt \
   mkpart BIOS-BOOT 1MiB 3MiB \
@@ -69,7 +68,6 @@ mkdir -p /dev/disk/by-uuid
 ln -sfn "../../${base}p3" "/dev/disk/by-uuid/$root_uuid"
 ln -sfn "../../${base}p2" "/dev/disk/by-uuid/$esp_uuid"
 
-# chroot with the final disk layout
 mount --rbind /dev "$mnt/dev"
 mount --make-rslave "$mnt/dev"
 mount -t proc proc "$mnt/proc"

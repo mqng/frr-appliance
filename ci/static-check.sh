@@ -21,7 +21,6 @@ fi
 
 fail() { echo "$1" >&2; exit 1; }
 
-# real chroot, loop devices, no emulation
 grep -q -- '--mode=root' ci/build.sh || fail 'mmdebstrap root mode missing'
 ! grep -q -- '--mode=fakechroot' ci/build.sh || fail 'fakechroot must not be used'
 grep -q -- '--format=tar' ci/build.sh || fail 'mmdebstrap tar output missing'
@@ -29,41 +28,34 @@ grep -q -- '--format=tar' ci/build.sh || fail 'mmdebstrap tar output missing'
 ! grep -RInE --exclude='static-check.sh' 'guestfish|virt-cat|libguestfs|supermin' ci scripts >/dev/null || fail 'libguestfs must not be in the build path'
 grep -q 'attach_loop' ci/assemble-image.sh || fail 'loop-backed assembly missing'
 
-# boot paths
 grep -q 'grub-install --target=i386-pc' scripts/image-finalize || fail 'BIOS GRUB install missing'
 grep -q -- '--target=x86_64-efi' scripts/image-finalize || fail 'UEFI GRUB install missing'
 grep -q -- '--removable' scripts/image-finalize || fail 'UEFI removable fallback missing'
 grep -q 'OVMF_CODE_4M.ms.fd' ci/smoke-test.sh || fail 'Secure Boot test missing'
 
-# signed package sources
 grep -q 'Signed-By: /usr/share/keyrings/frrouting.gpg' scripts/install-frr.sh || fail 'FRR keyring missing'
 grep -q 'Signed-By: /etc/apt/keyrings/fdio-release.asc' scripts/install-vpp.sh || fail 'VPP keyring missing'
 grep -qE '^key_sha256=[0-9a-f]{64}$' scripts/install-frr.sh || fail 'FRR key is not pinned'
 grep -qE '^key_sha256=[0-9a-f]{64}$' scripts/install-vpp.sh || fail 'VPP key is not pinned'
-# frr-stable follows feature and major releases
 grep -qE '^channel=frr-[0-9]+\.[0-9]+$' scripts/install-frr.sh || fail 'FRR must track a patch line'
 # Debian ships frr too, ours has to outrank it
 grep -q 'Pin: origin deb.frrouting.org' config/common/etc/apt/preferences.d/50-frr || fail 'FRR is not pinned to its own repo'
 ! grep -q 'apt-mark hold frr' scripts/provision-rootfs.sh || fail 'holding frr hides patch releases'
 
-# backups get copied around
 ! grep -qE 'etc/(shadow|gshadow|ssh/ssh_host|sudoers)' scripts/appliance-backup || fail 'backup must not include credentials'
 grep -q 'nft --check --file /etc/nftables.conf' scripts/appliance-restore || fail 'restore must validate the firewall before reloading'
 ! grep -RInE --exclude='static-check.sh' 'A90FC36D|4A56C773|3D9968AC|BBC9ACA9|9CD45627' scripts ci >/dev/null || fail 'hard-coded repository signer'
 
 # frr is Before=network.target, nothing it waits on may be after
 grep -qx 'After=' config/vpp/etc/systemd/system/vpp.service.d/20-appliance.conf || fail 'vpp.service must reset After='
-# PARTN needs util-linux 2.40
 ! grep -RInE --exclude='static-check.sh' '^[^#]*lsblk[^|]*PARTN' ci scripts >/dev/null || fail 'lsblk PARTN is unavailable on bookworm'
 
-# admin works without sudo
 grep -q '/usr/local/sbin' config/common/etc/profile.d/99-appliance.sh || fail 'admin PATH lacks sbin'
 grep -q 'systemd-journal' scripts/provision-rootfs.sh || fail 'admin cannot read the journal'
 grep -qE '(^| )dbus( |$)' ci/build.sh || fail 'no system bus, systemctl fails for admin'
 grep -q 'gid netadmin' scripts/vpp-dpdk-prepare || fail 'VPP CLI socket would need sudo'
 grep -q '^kernel.printk' config/common/etc/sysctl.d/99-frr-appliance.conf || fail 'console loglevel not pinned'
 
-# control plane closed, transit open
 grep -q 'hook input priority filter; policy drop' config/common/etc/nftables.conf || fail 'control plane must be default-deny'
 grep -q 'hook forward priority filter; policy accept' config/common/etc/nftables.conf || fail 'a router must forward by default'
 grep -q 'nft --check --file /etc/nftables.conf' scripts/provision-rootfs.sh || fail 'firewall not validated at build time'
@@ -78,7 +70,6 @@ done
 grep -q 'appliance-getty' scripts/provision-rootfs.sh || fail 'appliance-getty not installed'
 ! grep -q 'hostnamectl' scripts/appliance-firstboot || fail 'first boot must not need systemd-hostnamed'
 
-# self-test signalling
 grep -q 'APPLIANCE_BOOT=READY' scripts/appliance-selftest || fail 'boot signal missing'
 grep -q 'APPLIANCE_SELFTEST=PASS' scripts/appliance-selftest || fail 'self-test signal missing'
 grep -q 'org.frr.appliance.selftest' ci/smoke-test.sh || fail 'self-test channel missing'

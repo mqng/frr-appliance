@@ -88,7 +88,6 @@ uefi=(
 )
 boot_wait uefi-secureboot "${uefi[@]}"
 
-# wait for a log marker, then stop the guest
 run_until() {
   local label=$1 marker=$2 limit=$3
   shift 3
@@ -122,8 +121,7 @@ installer=(
 )
 run_until installer-prompt 'FRR_APPLIANCE_INSTALLER=READY' 180 "${installer[@]}"
 
-# real write. -kernel skips the menu so the target is an arg, -no-reboot lets
-# the guest end the run with the disk flushed
+# -kernel skips the menu so the target is an arg, -no-reboot flushes the disk
 kernel="$PWD/work/$variant/installer-iso/vmlinuz"
 initrd="$PWD/work/$variant/installer-iso/installer-initrd.gz"
 [[ -r "$kernel" && -r "$initrd" ]] || { echo 'installer kernel or initrd missing' >&2; exit 1; }
