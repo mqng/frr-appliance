@@ -1,0 +1,200 @@
+name: appliance
+
+# Mirrors .gitlab-ci.yml. Both pipelines drive the same ci/*.sh scripts, so the
+# only GitHub-specific logic lives in this file and ci/create-github-release.sh.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '17 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      variants:
+        description: Which variants to build
+        type: choice
+        default: both
+        options: [both, vanilla, vpp]
+      qemu_accel:
+        description: QEMU accelerator for the smoke tests
+        type: choice
+        default: tcg
+        options: [tcg, kvm]
+      publish_release:
+        description: Attach the output to a GitHub release
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+  DISK_SIZE: "4G"
+  # GitHub caps release assets at 2 GiB and the raw image is 4 GiB, so it is
+  # built into ./out but neither signed nor published. The compressed image,
+  # the qcow2 and the installer ISO all fit.
+  PUBLISH_RAW_IMG: "false"
+
+jobs:
+  # A full build costs hours of runner time, so gate it on the cheap checks that
+  # ci/pipeline.sh would otherwise reach only after resolving a base image.
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Static checks
+        run: bash ci/static-check.sh
+
+  build:
+    needs: lint
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    permissions:
+      contents: read
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: ${{ fromJSON(github.event.inputs.variants == 'vanilla' && '["vanilla"]' || github.event.inputs.variants == 'vpp' && '["vpp"]' || '["vanilla","vpp"]') }}
+    # Equivalent of GitLab's resource_group: one build per variant at a time.
+    concurrency:
+      group: frr-appliance-${{ matrix.variant }}
+      cancel-in-progress: false
+    env:
+      APPLIANCE_VARIANT: ${{ matrix.variant }}
+      QEMU_ACCEL: ${{ github.event.inputs.qemu_accel || 'tcg' }}
+      # ci/finalize-artifacts.sh records these in the build manifest and the
+      # SLSA provenance. They fall back to "local" when unset, which would make
+      # the provenance of a CI build useless.
+      CI_COMMIT_SHA: ${{ github.sha }}
+      CI_PROJECT_URL: ${{ github.server_url }}/${{ github.repository }}
+      CI_PIPELINE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      CI_RUNNER_DESCRIPTION: github-hosted ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          # A build needs roughly 10 GB for the rootfs tarball, the 4 GiB image,
+          # its compressed forms, the Debian netinst ISO and the installer ISO.
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL
+          sudo docker image prune --all --force >/dev/null
+          df -h /
+
+      - name: Build, verify, smoke-test and sign
+        run: |
+          set -euo pipefail
+
+          # Build each variant on the Debian release it targets, matching the
+          # suites pinned in ci/resolve-base.sh and the images in .gitlab-ci.yml.
+          case "$APPLIANCE_VARIANT" in
+            vanilla) builder=debian:13-slim ;;
+            vpp)     builder=debian:12-slim ;;
+            *) echo "unknown variant: $APPLIANCE_VARIANT" >&2; exit 2 ;;
+          esac
+
+          # ci/build.sh derives this from git, which the slim builder lacks.
+          SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
+          export SOURCE_DATE_EPOCH
+
+          # GitLab supplies SIGSTORE_ID_TOKEN through id_tokens. Mint the
+          # equivalent here and keep it in this step's environment only, so it
+          # never lands in a file on the runner.
+          SIGSTORE_ID_TOKEN=$(curl --fail --silent --show-error \
+            --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sigstore" | jq -r '.value')
+          [[ -n "$SIGSTORE_ID_TOKEN" && "$SIGSTORE_ID_TOKEN" != null ]] || {
+            echo 'Failed to mint a Sigstore OIDC token' >&2
+            exit 1
+          }
+          echo "::add-mask::$SIGSTORE_ID_TOKEN"
+          export SIGSTORE_ID_TOKEN
+
+          # QEMU_ACCEL=kvm only helps if the runner actually exposes /dev/kvm.
+          accel=()
+          if [[ -e /dev/kvm ]]; then accel=(--device /dev/kvm); fi
+
+          # --privileged is required, exactly as on GitLab's privileged Docker
+          # executor: the image is assembled on loop devices and finalised in a
+          # real chroot (ci/lib/loop-image.sh, ci/assemble-image.sh).
+          docker run --rm --privileged "${accel[@]}" \
+            --volume "$GITHUB_WORKSPACE:/build" \
+            --workdir /build \
+            --env APPLIANCE_VARIANT \
+            --env DEBIAN_FRONTEND \
+            --env DISK_SIZE \
+            --env QEMU_ACCEL \
+            --env PUBLISH_RAW_IMG \
+            --env SOURCE_DATE_EPOCH \
+            --env SIGSTORE_ID_TOKEN \
+            --env CI_COMMIT_SHA \
+            --env CI_PROJECT_URL \
+            --env CI_PIPELINE_URL \
+            --env CI_RUNNER_DESCRIPTION \
+            "$builder" \
+            bash -c 'bash ci/install-build-deps.sh && bash ci/pipeline.sh "$APPLIANCE_VARIANT"'
+
+      - name: Restore workspace ownership
+        if: always()
+        run: sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE"
+
+      # Same set GitLab keeps as job artifacts: metadata and smoke-test logs,
+      # available even when the build fails.
+      - name: Upload build metadata
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: metadata-${{ matrix.variant }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            out/*.json
+            out/*.txt
+            out/*.env
+            out/*SHA256SUMS
+            out/*.sigstore.json
+            work/*/smoke/*.log
+            work/*/smoke/*.selftest
+            work/base/*SUMS*
+
+      # Handoff to the release job. Everything here is already compressed, so
+      # skip the artifact zip step.
+      - name: Upload release payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-payload-${{ matrix.variant }}
+          retention-days: 1
+          compression-level: 0
+          if-no-files-found: error
+          path: |
+            out/*
+            !out/*.img
+
+  release:
+    needs: build
+    if: ${{ github.event_name != 'pull_request' && github.event.inputs.publish_release != 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect build output
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-payload-*
+          merge-multiple: true
+          path: out
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash ci/create-github-release.sh
