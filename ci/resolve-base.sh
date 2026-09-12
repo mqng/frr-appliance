@@ -2,31 +2,39 @@
 set -euo pipefail
 
 variant=${1:?}
-mkdir -p work/base
+mkdir -p work/base out
 
-if [[ "$variant" == vanilla ]]; then
-  suite=trixie
-  base_url=https://cdimage.debian.org/debian-cd/current/amd64/iso-cd
-else
-  suite=bookworm
-  base_url=https://cdimage.debian.org/cdimage/archive/12.15.0/amd64/iso-cd
-fi
+case "$variant" in
+  vanilla)
+    suite=trixie
+    expected_major=13
+    base_url=https://cdimage.debian.org/debian-cd/current/amd64/iso-cd
+    ;;
+  vpp)
+    suite=bookworm
+    expected_major=12
+    base_url=https://cdimage.debian.org/cdimage/archive/12.15.0/amd64/iso-cd
+    ;;
+  *) exit 2 ;;
+esac
 
+# The Debian ISO is used only as the small boot environment for the bare-metal
+# installer. The appliance rootfs itself comes directly from signed APT repos.
 curl --fail --location --retry 4 --retry-all-errors --proto '=https' --tlsv1.2 \
   "$base_url/SHA512SUMS" -o work/base/SHA512SUMS
 curl --fail --location --retry 4 --retry-all-errors --proto '=https' --tlsv1.2 \
   "$base_url/SHA512SUMS.sign" -o work/base/SHA512SUMS.sign
 
-keyring=""
-for candidate in /usr/share/keyrings/debian-role-keys.gpg /usr/share/keyrings/debian-keyring.gpg /usr/share/keyrings/debian-archive-keyring.gpg; do
-  if [[ -r "$candidate" ]]; then keyring="$candidate"; break; fi
+keyring_args=()
+for candidate in   /usr/share/keyrings/debian-role-keys.gpg   /usr/share/keyrings/debian-keyring.gpg   /usr/share/keyrings/debian-archive-keyring.gpg
+do
+  [[ -r "$candidate" ]] && keyring_args+=(--keyring "$candidate")
 done
-[[ -n "$keyring" ]] || { echo "No Debian verification keyring found" >&2; exit 1; }
-
-gpgv --keyring "$keyring" work/base/SHA512SUMS.sign work/base/SHA512SUMS
+[[ ${#keyring_args[@]} -gt 0 ]] || { echo 'No Debian verification keyring found' >&2; exit 1; }
+gpgv "${keyring_args[@]}" work/base/SHA512SUMS.sign work/base/SHA512SUMS
 
 iso_name=$(awk '$2 ~ /^debian-[0-9.]+-amd64-netinst\.iso$/ {print $2; exit}' work/base/SHA512SUMS)
-[[ -n "$iso_name" ]] || { echo "Unable to resolve Debian netinst ISO" >&2; exit 1; }
+[[ -n "$iso_name" ]] || { echo 'Unable to resolve Debian netinst ISO' >&2; exit 1; }
 
 curl --fail --location --retry 4 --retry-all-errors --proto '=https' --tlsv1.2 \
   "$base_url/$iso_name" -o "work/base/$iso_name"
@@ -37,19 +45,12 @@ curl --fail --location --retry 4 --retry-all-errors --proto '=https' --tlsv1.2 \
 
 version=${iso_name#debian-}
 version=${version%-amd64-netinst.iso}
-
-case "$variant" in
-  vanilla) expected_major=13 ;;
-  vpp) expected_major=12 ;;
-  *) echo "Unsupported variant: $variant" >&2; exit 1 ;;
-esac
-if [[ "$version" != "$expected_major".* ]]; then
-  echo "Refusing unreviewed Debian version: expected $expected_major.x, actual $version" >&2
+[[ "$version" == "$expected_major".* ]] || {
+  echo "Refusing unreviewed Debian major: expected $expected_major.x, got $version" >&2
   exit 1
-fi
+}
 
 sha512=$(sha512sum "work/base/$iso_name" | awk '{print $1}')
-
 cat > work/base.env <<ENV
 APPLIANCE_VARIANT=$variant
 DEBIAN_SUITE=$suite
@@ -58,6 +59,8 @@ DEBIAN_ISO_NAME=$iso_name
 DEBIAN_ISO_PATH=$PWD/work/base/$iso_name
 DEBIAN_ISO_SHA512=$sha512
 DEBIAN_BASE_URL=$base_url
+DEBIAN_APT_MIRROR=https://deb.debian.org/debian
+DEBIAN_SECURITY_MIRROR=https://security.debian.org/debian-security
 ENV
 
 cat > out/base-source.json <<JSON
@@ -65,8 +68,12 @@ cat > out/base-source.json <<JSON
   "variant": "$variant",
   "debian_suite": "$suite",
   "debian_version": "$version",
-  "debian_iso": "$iso_name",
-  "debian_iso_sha512": "$sha512",
-  "debian_source": "$base_url"
+  "rootfs_sources": [
+    "https://deb.debian.org/debian",
+    "https://security.debian.org/debian-security"
+  ],
+  "installer_iso": "$iso_name",
+  "installer_iso_sha512": "$sha512",
+  "installer_iso_source": "$base_url"
 }
 JSON

@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version=${CI_COMMIT_TAG:-$(date -u +%Y%m%d)-${CI_PIPELINE_IID}}
+if [[ -n "${CI_COMMIT_TAG:-}" ]]; then
+  version=$CI_COMMIT_TAG
+else
+  pipeline_date=${CI_PIPELINE_CREATED_AT%%T*}
+  pipeline_date=${pipeline_date//-/}
+  version="${pipeline_date}-${CI_PIPELINE_IID}"
+fi
 tag="appliance-$version"
 api="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/releases"
 

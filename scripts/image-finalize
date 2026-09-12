@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+variant=${1:?usage: image-finalize <vanilla|vpp>}
+case "$variant" in vanilla|vpp) ;; *) exit 2 ;; esac
+
+# fakechroot intentionally cannot build every host-dependent cache correctly.
+# Rebuild them now that the rootfs is on its real disk inside libguestfs.
+ldconfig
+found_kernel=0
+for modules in /lib/modules/*; do
+  [[ -d "$modules" ]] || continue
+  kernel=${modules##*/}
+  found_kernel=1
+  depmod -a "$kernel"
+  if [[ -e "/boot/initrd.img-$kernel" ]]; then
+    update-initramfs -u -k "$kernel"
+  else
+    update-initramfs -c -k "$kernel"
+  fi
+done
+[[ $found_kernel -eq 1 ]] || { echo 'No installed kernel modules found' >&2; exit 1; }
+
+services=(
+  ssh nftables chrony auditd apparmor frr
+  appliance-identity.service appliance-grow-root.service appliance-selftest.service
+  getty@tty1.service serial-getty@ttyS0.service
+)
+if [[ "$variant" == vpp ]]; then
+  services+=(vpp vpp-dpdk-prepare.service vpp-lcp.service)
+fi
+systemctl enable "${services[@]}"
+
+# BIOS and UEFI are installed into the same GPT image. For UEFI, do the
+# removable path and normal Debian path separately. This avoids Debian #1139922
+# where --force-extra-removable + --no-nvram can leave EFI/BOOT without grub.cfg.
+grub-install --target=i386-pc --recheck /dev/sda
+grub-install \
+  --target=x86_64-efi \
+  --efi-directory=/boot/efi \
+  --uefi-secure-boot \
+  --no-nvram \
+  --removable \
+  --recheck
+grub-install \
+  --target=x86_64-efi \
+  --efi-directory=/boot/efi \
+  --bootloader-id=debian \
+  --uefi-secure-boot \
+  --no-nvram \
+  --recheck
+update-grub
+
+test -s /boot/grub/grub.cfg
+test -s /boot/efi/EFI/BOOT/BOOTX64.EFI
+test -s /boot/efi/EFI/BOOT/grub.cfg
+test -s /boot/efi/EFI/debian/grub.cfg
+grep -q 'console=ttyS0,115200n8' /boot/grub/grub.cfg

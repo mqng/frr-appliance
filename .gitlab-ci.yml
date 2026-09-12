@@ -12,15 +12,14 @@ variables:
 
 .default_build:
   stage: build
-  image: debian:13-slim
-  timeout: 3h
+  timeout: 2h
   id_tokens:
     SIGSTORE_ID_TOKEN:
       aud: sigstore
   before_script:
-    - ./ci/install-build-deps.sh
+    - bash ci/install-build-deps.sh
   script:
-    - ./ci/pipeline.sh "$APPLIANCE_VARIANT"
+    - bash ci/pipeline.sh "$APPLIANCE_VARIANT"
   artifacts:
     when: always
     expire_in: 7 days
@@ -28,14 +27,11 @@ variables:
       - out/*.json
       - out/*.txt
       - out/*.env
-      - out/SHA256SUMS
+      - out/*SHA256SUMS
       - out/*.sigstore.json
-      - work/*/install-console.log
-      - work/*/http.log
-      - work/*/http/preseed.cfg
       - work/*/smoke/*.log
-      - work/*/smoke/*.qemu-debug.log
       - work/*/smoke/*.selftest
+      - work/base/*SUMS*
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
     - if: '$CI_PIPELINE_SOURCE == "web"'
@@ -43,12 +39,14 @@ variables:
 
 build:vanilla:
   extends: .default_build
+  image: debian:13-slim
   variables:
     APPLIANCE_VARIANT: vanilla
   resource_group: frr-appliance-vanilla
 
 build:vpp:
   extends: .default_build
+  image: debian:12-slim
   variables:
     APPLIANCE_VARIANT: vpp
   resource_group: frr-appliance-vpp
@@ -65,7 +63,7 @@ release:
     - apt-get update
     - apt-get install -y --no-install-recommends ca-certificates curl jq
   script:
-    - ./ci/create-release.sh
+    - bash ci/create-release.sh
   rules:
     - if: '$PUBLISH_RELEASE == "true" && $CI_PIPELINE_SOURCE == "schedule"'
     - if: '$PUBLISH_RELEASE == "true" && $CI_PIPELINE_SOURCE == "web"'
