@@ -101,9 +101,8 @@ UNIT
 cat > /etc/systemd/system/appliance-selftest.service <<UNIT
 [Unit]
 Description=FRR appliance boot self-test
-After=appliance-identity.service frr.service
-Wants=appliance-identity.service frr.service
-$( [[ "$variant" == vpp ]] && printf 'After=vpp-lcp.service\nWants=vpp-lcp.service\n' )
+After=appliance-identity.service
+Wants=appliance-identity.service
 
 [Service]
 Type=oneshot

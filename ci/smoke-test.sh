@@ -56,7 +56,7 @@ boot_wait() {
     fi
 
     if [[ $ready -eq 1 && $test_deadline -eq 0 ]]; then
-      test_deadline=$((SECONDS + 300))
+      test_deadline=$((SECONDS + 360))
     fi
 
     if grep -q 'APPLIANCE_SELFTEST=PASS' "$result" 2>/dev/null; then

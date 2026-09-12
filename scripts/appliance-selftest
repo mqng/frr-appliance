@@ -17,26 +17,47 @@ emit() {
 
 fail() {
   emit "APPLIANCE_SELFTEST=FAIL variant=$variant check=$1"
+  emit "APPLIANCE_DIAG frr_active=$(systemctl is-active frr 2>/dev/null || true) frr_substate=$(systemctl show -p SubState --value frr 2>/dev/null || true)"
   exit 1
 }
 
 emit "APPLIANCE_SELFTEST=START variant=$variant"
 
-systemctl is-active --quiet frr || fail frr-service
-vtysh -c 'show version' >/dev/null 2>&1 || fail frr-vtysh
-vtysh -c 'show interface' >/dev/null 2>&1 || fail frr-interface
-sshd -t || fail sshd
-nft --check --file /etc/nftables.conf || fail nftables
+# Do not order this unit behind FRR. A restarting FRR service would prevent the
+# diagnostic itself from ever running. Poll explicitly and fail with a reason.
+deadline=$((SECONDS + 180))
+while ! systemctl is-active --quiet frr; do
+  if (( SECONDS >= deadline )); then
+    fail frr-service-timeout
+  fi
+  sleep 2
+done
+
+# Every external control-plane probe is bounded. A wedged daemon must become a
+# useful CI failure, not a five-minute smoke-test timeout.
+timeout 20s vtysh -d zebra -c 'show version' >/dev/null 2>&1 || fail frr-zebra-vty
+timeout 20s vtysh -d zebra -c 'show interface' >/dev/null 2>&1 || fail frr-zebra-interface
+timeout 30s /usr/lib/frr/frrinit.sh status >/dev/null 2>&1 || fail frr-daemon-status
+
+timeout 10s sshd -t || fail sshd
+timeout 10s nft --check --file /etc/nftables.conf || fail nftables
 
 test -s /boot/efi/EFI/BOOT/BOOTX64.EFI || fail uefi-bootloader
 
 if [[ "$variant" == "vpp" ]]; then
-  systemctl is-active --quiet vpp || fail vpp-service
-  vppctl show version >/dev/null 2>&1 || fail vpp-cli
-  vppctl show interface >/dev/null 2>&1 || fail vpp-interface
+  deadline=$((SECONDS + 180))
+  while ! systemctl is-active --quiet vpp; do
+    if (( SECONDS >= deadline )); then
+      fail vpp-service-timeout
+    fi
+    sleep 2
+  done
+
+  timeout 20s vppctl show version >/dev/null 2>&1 || fail vpp-cli
+  timeout 20s vppctl show interface >/dev/null 2>&1 || fail vpp-interface
 
   if [[ -s /run/appliance/vpp-ifaces.tsv ]]; then
-    lcp_state=$(vppctl show lcp 2>&1) || fail vpp-lcp
+    lcp_state=$(timeout 20s vppctl show lcp 2>&1) || fail vpp-lcp
     while IFS=$'\t' read -r iface pci; do
       [[ -n "$iface" && -n "$pci" ]] || continue
       grep -Fq "$iface" <<<"$lcp_state" || fail "vpp-lcp-$iface"
