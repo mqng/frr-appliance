@@ -122,10 +122,10 @@ cat "$workdir/grub.cfg.orig" >> "$workdir/grub.cfg"
 xorriso \
   -abort_on FAILURE \
   -report_about WARNING \
-  -overwrite nondir \
   -indev "$base_iso" \
   -outdev "$out_iso" \
-  -mkdir /appliance \
+  -overwrite nondir \
+  -mkdir /appliance -- \
   -map "$workdir/appliance.img.gz" /appliance/appliance.img.gz \
   -map "$workdir/SHA256SUMS" /appliance/SHA256SUMS \
   -map "$workdir/install.sh" /appliance/install.sh \
