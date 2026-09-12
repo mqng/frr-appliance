@@ -5,10 +5,16 @@ apt-get update
 apt-get install -y --no-install-recommends \
   ca-certificates curl debian-keyring debian-archive-keyring gnupg gpgv jq \
   mmdebstrap \
-  libguestfs-tools qemu-system-x86 qemu-utils ovmf \
-  xorriso gzip zstd python3 coreutils util-linux file \
-  passwd
+  parted dosfstools e2fsprogs util-linux \
+  qemu-system-x86 qemu-utils ovmf \
+  xorriso gzip zstd python3 coreutils file passwd
 rm -rf /var/lib/apt/lists/*
+
+# Fail before downloading a Debian rootfs if this hosted runner cannot attach
+# loop devices. GitLab.com's saas-linux runners are privileged.
+# shellcheck source=ci/lib/loop-image.sh
+source ci/lib/loop-image.sh
+loop_preflight
 
 COSIGN_VERSION=${COSIGN_VERSION:-3.1.3}
 case "$COSIGN_VERSION" in

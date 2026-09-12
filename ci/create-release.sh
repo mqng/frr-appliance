@@ -37,6 +37,19 @@ payload=$(jq -n \
   --argjson links "$links" \
   '{tag_name:$tag,ref:$ref,name:$name,description:$desc,assets:{links:$links}}')
 
+# A retried release job can encounter the release created by its first run.
+# Recreate it so asset links exactly match the current package publication.
+status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
+  --header "JOB-TOKEN: ${CI_JOB_TOKEN}" "$api/$tag")
+case "$status" in
+  200)
+    curl --fail-with-body --request DELETE \
+      --header "JOB-TOKEN: ${CI_JOB_TOKEN}" "$api/$tag" >/dev/null
+    ;;
+  404) ;;
+  *) echo "Unexpected GitLab release lookup status: $status" >&2; exit 1 ;;
+esac
+
 curl --fail-with-body --request POST \
   --header "JOB-TOKEN: ${CI_JOB_TOKEN}" \
   --header 'Content-Type: application/json' \

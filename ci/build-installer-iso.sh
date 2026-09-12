@@ -49,6 +49,22 @@ else
   disks=$(ls /dev/sd? /dev/vd? /dev/nvme?n1 2>/dev/null || true)
 fi
 
+# Never offer the device that contains the installer itself as an erase target.
+cdrom_source=$(awk '$2 == "/cdrom" { print $1; exit }' /proc/mounts)
+installer_disk=""
+case "$cdrom_source" in
+  /dev/nvme*n*p[0-9]*|/dev/mmcblk*p[0-9]*) installer_disk=${cdrom_source%p[0-9]*} ;;
+  /dev/sd[a-z][0-9]*|/dev/vd[a-z][0-9]*) installer_disk=$(printf '%s' "$cdrom_source" | sed 's/[0-9][0-9]*$//') ;;
+  /dev/sd[a-z]|/dev/vd[a-z]|/dev/nvme*n[0-9]|/dev/mmcblk[0-9]*) installer_disk=$cdrom_source ;;
+esac
+
+filtered_disks=""
+for d in $disks; do
+  [ -n "$installer_disk" ] && [ "$d" = "$installer_disk" ] && continue
+  filtered_disks="$filtered_disks $d"
+done
+disks=$(printf '%s\n' $filtered_disks 2>/dev/null || true)
+
 [ -n "$disks" ] || { echo "No installable disks found"; exec sh; }
 
 target=$cmd_target
@@ -70,7 +86,11 @@ if [ -z "$target" ]; then
   fi
 fi
 
-[ -b "$target" ] || { echo "Invalid target: $target"; exec sh; }
+valid_target=0
+for d in $disks; do
+  [ "$target" = "$d" ] && valid_target=1
+done
+[ "$valid_target" -eq 1 ] && [ -b "$target" ] || { echo "Invalid or unsafe target: $target"; exec sh; }
 
 echo "Target: $target"
 if [ "$autoinstall" -ne 1 ]; then

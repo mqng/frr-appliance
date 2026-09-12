@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-variant=${1:?usage: image-finalize <vanilla|vpp>}
+variant=${1:?usage: image-finalize <vanilla|vpp> <disk>}
+disk=${2:?usage: image-finalize <vanilla|vpp> <disk>}
 case "$variant" in vanilla|vpp) ;; *) exit 2 ;; esac
+[[ -b "$disk" ]] || { echo "Not a block device: $disk" >&2; exit 1; }
 
-# Rebuild host-dependent caches after the rootfs has been placed on its final disk.
 ldconfig
 found_kernel=0
 for modules in /lib/modules/*; do
@@ -30,10 +31,9 @@ if [[ "$variant" == vpp ]]; then
 fi
 systemctl enable "${services[@]}"
 
-# BIOS and UEFI are installed into the same GPT image. For UEFI, do the
-# removable path and normal Debian path separately. This avoids Debian #1139922
-# where --force-extra-removable + --no-nvram can leave EFI/BOOT without grub.cfg.
-grub-install --target=i386-pc --recheck /dev/sda
+# Install BIOS GRUB into the whole disk, then signed UEFI GRUB/shim into both
+# the removable fallback path and Debian's normal EFI path.
+grub-install --target=i386-pc --recheck "$disk"
 grub-install \
   --target=x86_64-efi \
   --efi-directory=/boot/efi \

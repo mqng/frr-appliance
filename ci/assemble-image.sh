@@ -6,32 +6,58 @@ rootfs=${2:?}
 img=${3:?}
 size=${DISK_SIZE:-4G}
 
+# shellcheck source=ci/lib/loop-image.sh
+source ci/lib/loop-image.sh
+
+mnt=$(mktemp -d)
+loopdev=""
+cleanup() {
+  set +e
+  if mountpoint -q "$mnt/run"; then umount "$mnt/run"; fi
+  if mountpoint -q "$mnt/sys"; then umount -R "$mnt/sys"; fi
+  if mountpoint -q "$mnt/proc"; then umount "$mnt/proc"; fi
+  if mountpoint -q "$mnt/dev"; then umount -R "$mnt/dev"; fi
+  if mountpoint -q "$mnt/boot/efi"; then umount "$mnt/boot/efi"; fi
+  if mountpoint -q "$mnt"; then umount "$mnt"; fi
+  if [[ -n "$loopdev" ]]; then losetup -d "$loopdev" 2>/dev/null || true; fi
+  rmdir "$mnt" 2>/dev/null || true
+}
+trap cleanup EXIT
+
 rm -f "$img"
 truncate -s "$size" "$img"
-export LIBGUESTFS_BACKEND=direct
+loopdev=$(attach_loop "$img" rw yes)
 
-# GPT: 2 MiB BIOS boot, 512 MiB ESP, remainder ext4 root.
-guestfish --format=raw -a "$img" <<EOF_GUEST
-run
-part-init /dev/sda gpt
-part-add /dev/sda p 2048 6143
-part-add /dev/sda p 6144 1054719
-part-add /dev/sda p 1054720 -2048
-part-set-gpt-type /dev/sda 1 21686148-6449-6E6F-744E-656564454649
-part-set-gpt-type /dev/sda 2 C12A7328-F81F-11D2-BA4B-00A0C93EC93B
-part-set-name /dev/sda 1 BIOS-BOOT
-part-set-name /dev/sda 2 EFI-SYSTEM
-part-set-name /dev/sda 3 ROOT
-mkfs fat /dev/sda2 label:EFI
-mkfs ext4 /dev/sda3 label:rootfs
-mount /dev/sda3 /
-mkdir-p /boot/efi
-mount /dev/sda2 /boot/efi
-tar-in $rootfs / xattrs:true
-write /boot/grub/device.map "(hd0) /dev/sda\n"
-command "/usr/local/libexec/frr-appliance-image-finalize $variant"
-rm /usr/local/libexec/frr-appliance-image-finalize
+# GPT: BIOS boot area, 512 MiB ESP, remainder ext4 root.
+parted -s "$loopdev" \
+  mklabel gpt \
+  mkpart BIOS-BOOT 1MiB 3MiB \
+  set 1 bios_grub on \
+  mkpart EFI-SYSTEM fat32 3MiB 515MiB \
+  set 2 esp on \
+  mkpart ROOT ext4 515MiB 100%
+create_partition_nodes "$loopdev" 3
+
+base=$(basename "$loopdev")
+esp="/dev/${base}p2"
+root="/dev/${base}p3"
+
+mkfs.vfat -F 32 -n EFI "$esp" >/dev/null
+mkfs.ext4 -F -L rootfs "$root" >/dev/null
+
+mount "$root" "$mnt"
+mkdir -p "$mnt/boot/efi"
+mount "$esp" "$mnt/boot/efi"
+tar --numeric-owner --xattrs --xattrs-include='*' --acls -xf "$rootfs" -C "$mnt"
+
+# Finalize the image in a real chroot with the final block-device layout.
+mount --rbind /dev "$mnt/dev"
+mount --make-rslave "$mnt/dev"
+mount -t proc proc "$mnt/proc"
+mount --rbind /sys "$mnt/sys"
+mount --make-rslave "$mnt/sys"
+mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs "$mnt/run"
+
+chroot "$mnt" /usr/local/libexec/frr-appliance-image-finalize "$variant" "$loopdev"
+rm -f "$mnt/usr/local/libexec/frr-appliance-image-finalize"
 sync
-umount-all
-shutdown
-EOF_GUEST

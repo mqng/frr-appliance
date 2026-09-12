@@ -1,37 +1,39 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
 variant=${1:?}
 name="frr-appliance-${variant}-amd64"
 img="$PWD/out/$name.img"
-export LIBGUESTFS_BACKEND=direct
 
-# Offline verification catches image/layout errors without booting another VM.
-guestfish --ro --format=raw -a "$img" <<'EOF_GUEST'
-run
-mount-ro /dev/sda3 /
-mount-ro /dev/sda2 /boot/efi
-command "test -s /etc/appliance/build.env"
-command "test -s /etc/appliance/packages.txt"
-command "test -s /etc/frr/frr.conf"
-command "test -s /boot/grub/grub.cfg"
-command "test -s /boot/efi/EFI/BOOT/BOOTX64.EFI"
-command "test -s /boot/efi/EFI/BOOT/grub.cfg"
-command "test -s /boot/efi/EFI/debian/grub.cfg"
-command "dpkg-query -W frr"
-command "grep -q '^LABEL=rootfs / ' /etc/fstab"
-command "grep -q 'console=ttyS0,115200n8' /boot/grub/grub.cfg"
-umount-all
-shutdown
-EOF_GUEST
+# shellcheck source=ci/lib/loop-image.sh
+source ci/lib/loop-image.sh
+mnt=$(mktemp -d)
+loopdev=""
+cleanup() {
+  set +e
+  if mountpoint -q "$mnt/boot/efi"; then umount "$mnt/boot/efi"; fi
+  if mountpoint -q "$mnt"; then umount "$mnt"; fi
+  [[ -n "$loopdev" ]] && losetup -d "$loopdev" 2>/dev/null || true
+  rmdir "$mnt" 2>/dev/null || true
+}
+trap cleanup EXIT
 
+loopdev=$(attach_loop "$img" ro yes)
+create_partition_nodes "$loopdev" 3
+base=$(basename "$loopdev")
+mount -o ro,noload "/dev/${base}p3" "$mnt"
+mkdir -p "$mnt/boot/efi"
+mount -o ro "/dev/${base}p2" "$mnt/boot/efi"
+
+test -s "$mnt/etc/appliance/build.env"
+test -s "$mnt/etc/appliance/packages.txt"
+test -s "$mnt/etc/frr/frr.conf"
+test -s "$mnt/boot/grub/grub.cfg"
+test -s "$mnt/boot/efi/EFI/BOOT/BOOTX64.EFI"
+test -s "$mnt/boot/efi/EFI/debian/grub.cfg"
+grep -q '^LABEL=rootfs / ext4 ' "$mnt/etc/fstab"
+grep -q 'console=ttyS0,115200n8' "$mnt/boot/grub/grub.cfg"
+chroot "$mnt" dpkg-query -W frr >/dev/null
 if [[ "$variant" == vpp ]]; then
-  guestfish --ro --format=raw -a "$img" <<'EOF_GUEST'
-run
-mount-ro /dev/sda3 /
-command "dpkg-query -W vpp"
-command "test -s /etc/appliance/vpp-dpdk.conf"
-umount-all
-shutdown
-EOF_GUEST
+  chroot "$mnt" dpkg-query -W vpp >/dev/null
+  test -s "$mnt/etc/appliance/vpp-dpdk.conf"
 fi

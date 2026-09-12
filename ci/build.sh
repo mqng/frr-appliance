@@ -49,7 +49,7 @@ mmdebstrap \
   --include="$include" \
   --customize-hook="copy-in scripts config /tmp" \
   --customize-hook="chroot \"\$1\" /usr/bin/env DEBIAN_FRONTEND=noninteractive APPLIANCE_BUILD_EPOCH=$SOURCE_DATE_EPOCH /bin/bash /tmp/scripts/provision-rootfs.sh $variant" \
-  --customize-hook='chroot "$1" rm -rf /tmp/scripts /tmp/config /tmp/*' \
+  --customize-hook='chroot "$1" /bin/bash -c "rm -rf /tmp/scripts /tmp/config /tmp/*"' \
   "$DEBIAN_SUITE" "$rootfs" \
   "deb https://deb.debian.org/debian $DEBIAN_SUITE main" \
   "deb https://deb.debian.org/debian $DEBIAN_SUITE-updates main" \

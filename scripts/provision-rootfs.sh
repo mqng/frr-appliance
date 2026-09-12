@@ -8,9 +8,9 @@ export DEBIAN_FRONTEND=noninteractive
 . /etc/os-release
 suite=${VERSION_CODENAME:?}
 
-/tmp/scripts/install-frr.sh "$suite"
+bash /tmp/scripts/install-frr.sh "$suite"
 if [[ "$variant" == vpp ]]; then
-  /tmp/scripts/install-vpp.sh "$suite"
+  bash /tmp/scripts/install-vpp.sh "$suite"
 fi
 
 install -d -m 0755 /etc/appliance /usr/local/sbin /etc/sudoers.d
@@ -132,8 +132,11 @@ MODULES
 build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 frr_version=$(dpkg-query -W -f='${Version}' frr)
 vpp_version=none
+frr_keyring_sha256=$(sha256sum /usr/share/keyrings/frrouting.gpg | awk '{print $1}')
+vpp_keyring_sha256=none
 if dpkg-query -W vpp >/dev/null 2>&1; then
   vpp_version=$(dpkg-query -W -f='${Version}' vpp)
+  vpp_keyring_sha256=$(sha256sum /etc/apt/keyrings/fdio-release.asc | awk '{print $1}')
 fi
 cat > /etc/appliance/build.env <<ENV
 APPLIANCE_VARIANT=$variant
@@ -142,6 +145,8 @@ DEBIAN_VERSION=$VERSION_ID
 DEBIAN_CODENAME=$suite
 FRR_VERSION=$frr_version
 VPP_VERSION=$vpp_version
+FRR_KEYRING_SHA256=$frr_keyring_sha256
+VPP_KEYRING_SHA256=$vpp_keyring_sha256
 ENV
 
 dpkg-query -W -f='${binary:Package}\t${Version}\n' | LC_ALL=C sort > /etc/appliance/packages.txt
