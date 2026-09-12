@@ -119,7 +119,12 @@ menuentry 'Install FRR Appliance (ERASE DISK)' {
 GRUB
 cat "$workdir/grub.cfg.orig" >> "$workdir/grub.cfg"
 
-xorriso -indev "$base_iso" -outdev "$out_iso" \
+xorriso \
+  -abort_on FAILURE \
+  -report_about WARNING \
+  -overwrite nondir \
+  -indev "$base_iso" \
+  -outdev "$out_iso" \
   -mkdir /appliance \
   -map "$workdir/appliance.img.gz" /appliance/appliance.img.gz \
   -map "$workdir/SHA256SUMS" /appliance/SHA256SUMS \
@@ -128,4 +133,4 @@ xorriso -indev "$base_iso" -outdev "$out_iso" \
   -map "$workdir/txt.cfg" /isolinux/txt.cfg \
   -map "$workdir/isolinux.cfg" /isolinux/isolinux.cfg \
   -map "$workdir/grub.cfg" /boot/grub/grub.cfg \
-  -boot_image any replay >/dev/null 2>&1
+  -boot_image any replay
