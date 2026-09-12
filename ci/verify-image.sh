@@ -44,6 +44,13 @@ grep -q 'audit=1' "$mnt/boot/grub/grub.cfg"
 grep -q 'APT::Periodic::Unattended-Upgrade "0"' "$mnt/etc/apt/apt.conf.d/20auto-upgrades"
 [[ ! -e "$mnt/etc/apt/apt.conf.d/21appliance-auto-upgrades" ]]
 
+test -s "$mnt/etc/apt/preferences.d/50-frr"
+holds=$(chroot "$mnt" dpkg --get-selections | awk '$2 == "hold" { print $1 }')
+if grep -qx frr <<<"$holds"; then
+  echo 'frr must not be held, it hides patch releases' >&2
+  exit 1
+fi
+
 for unit in ssh nftables auditd frr appliance-selftest.service \
             appliance-update-check.timer tmp.mount; do
   chroot "$mnt" systemctl is-enabled "$unit" >/dev/null
@@ -53,4 +60,5 @@ chroot "$mnt" systemctl is-enabled snmpd.service >/dev/null && exit 1
 if [[ "$variant" == vpp ]]; then
   chroot "$mnt" dpkg-query -W vpp >/dev/null
   test -s "$mnt/etc/appliance/vpp-dpdk.conf"
+  grep -qx vpp <<<"$holds"
 fi

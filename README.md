@@ -17,8 +17,10 @@ Two variants, amd64 only:
 
 Nothing crosses a feature release on its own. Debian comes from a frozen suite,
 so builds pick up point releases and security updates only. FRR tracks a patch
-line, `frr-10.4`, set as `channel` in `scripts/install-frr.sh`. VPP comes from
-fd.io's `release` repo, which holds the last tagged release for the suite.
+line, `frr-10.4`, set as `channel` in `scripts/install-frr.sh` and made
+authoritative by `apt/preferences.d/50-frr`, since Debian ships an `frr` package
+of its own. VPP comes from fd.io's `release` repo, which holds the last tagged
+release for the suite.
 
 Each release lists the exact versions it was built from, so two runs can be
 compared without downloading anything.
@@ -100,7 +102,8 @@ Serial and VGA consoles both work at 115200 8N1, from GRUB to login.
   at first boot or with `APT::Periodic::Unattended-Upgrade "1"`. Never reboots on
   its own, but tells you at login when a newer kernel is waiting
 - `snmpd` installed but disabled. FRR exports MIBs over AgentX once you enable it
-- FRR and VPP packages held, so an upgrade cannot move them
+- FRR takes patch releases from `apt upgrade`, and cannot leave its line. VPP is
+  held, since fd.io has no per-line repo to pin against
 - CycloneDX SBOM, package list, build manifest and SLSA provenance, all signed
   with Sigstore
 

@@ -160,7 +160,9 @@ ENV
 
 dpkg-query -W -f='${binary:Package}\t${Version}\n' | LC_ALL=C sort > /etc/appliance/packages.txt
 
-apt-mark hold frr frr-pythontools frr-rpki-rtrlib frr-snmp >/dev/null 2>&1 || true
+# FRR is deliberately not held. preferences.d/50-frr plus the pinned line mean
+# apt can only offer patch releases, and a hold would keep those from apt upgrade
+# and from the update notice. fd.io has no per-line repo, so VPP gets a hold
 if [[ "$variant" == vpp ]]; then
   apt-mark hold vpp vpp-plugin-core vpp-plugin-dpdk vpp-drivers >/dev/null 2>&1 || true
 fi

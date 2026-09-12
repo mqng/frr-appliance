@@ -43,6 +43,9 @@ grep -qE '^key_sha256=[0-9a-f]{64}$' scripts/install-frr.sh || fail 'FRR key is 
 grep -qE '^key_sha256=[0-9a-f]{64}$' scripts/install-vpp.sh || fail 'VPP key is not pinned'
 # frr-stable follows feature and major releases
 grep -qE '^channel=frr-[0-9]+\.[0-9]+$' scripts/install-frr.sh || fail 'FRR must track a patch line'
+# Debian ships frr too, so the line pin only holds if the repo outranks it
+grep -q 'Pin: origin deb.frrouting.org' config/common/etc/apt/preferences.d/50-frr || fail 'FRR is not pinned to its own repo'
+! grep -q 'apt-mark hold frr' scripts/provision-rootfs.sh || fail 'holding frr hides patch releases'
 ! grep -RInE --exclude='static-check.sh' 'A90FC36D|4A56C773|3D9968AC|BBC9ACA9|9CD45627' scripts ci >/dev/null || fail 'hard-coded repository signer'
 
 # frr is Before=network.target, so nothing it waits on may be after

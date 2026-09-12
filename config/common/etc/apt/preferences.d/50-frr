@@ -1,0 +1,3 @@
+Package: frr*
+Pin: origin deb.frrouting.org
+Pin-Priority: 600
