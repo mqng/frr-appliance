@@ -62,7 +62,11 @@ if [[ "$variant" == vpp ]]; then
   chroot "$mnt" dpkg-query -W vpp >/dev/null
   test -s "$mnt/etc/appliance/vpp-dpdk.conf"
   grep -qx vpp <<<"$holds"
+  test -e "$mnt/lib/systemd/system/vpp.service"
+  test -e "$mnt/etc/systemd/system/vpp-dpdk-prepare.service"
+  test -e "$mnt/etc/systemd/system/vpp-lcp.service"
   for unit in vpp.service vpp-dpdk-prepare.service vpp-lcp.service; do
     chroot "$mnt" systemctl is-enabled "$unit" >/dev/null
+    test -L "$mnt/etc/systemd/system/multi-user.target.wants/$unit"
   done
 fi
