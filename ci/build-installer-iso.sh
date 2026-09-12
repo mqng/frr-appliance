@@ -119,6 +119,8 @@ menuentry 'Install FRR Appliance (ERASE DISK)' {
 GRUB
 cat "$workdir/grub.cfg.orig" >> "$workdir/grub.cfg"
 
+volid="FRR_${variant^^}_AMD64"
+
 xorriso \
   -abort_on FAILURE \
   -report_about WARNING \
@@ -126,6 +128,7 @@ xorriso \
   -outdev "$out_iso" \
   -overwrite nondir \
   -mkdir /appliance -- \
+  -volid "$volid" \
   -map "$workdir/appliance.img.gz" /appliance/appliance.img.gz \
   -map "$workdir/SHA256SUMS" /appliance/SHA256SUMS \
   -map "$workdir/install.sh" /appliance/install.sh \
