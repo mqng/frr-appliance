@@ -3,8 +3,13 @@ set -euo pipefail
 install -d -m 0755 /var/lib/appliance
 src=$(findmnt -n -o SOURCE /)
 [[ "$src" == /dev/* ]] || { touch /var/lib/appliance/root-grown; exit 0; }
-parent=$(lsblk -no PKNAME "$src" | head -1)
-partnum=$(lsblk -no PARTN "$src" | head -1)
+parent=$(lsblk -no PKNAME "$src" 2>/dev/null | head -1 || true)
+kname=$(lsblk -no KNAME "$src" 2>/dev/null | head -1 || true)
+# lsblk's PARTN column only exists from util-linux 2.40, so it is unavailable on
+# bookworm. sysfs carries the same value on every supported release.
+partnum=""
+[[ -n "$kname" && -r "/sys/class/block/$kname/partition" ]] &&
+  partnum=$(< "/sys/class/block/$kname/partition")
 [[ -n "$parent" && -n "$partnum" ]] || { touch /var/lib/appliance/root-grown; exit 0; }
 growpart "/dev/$parent" "$partnum" || true
 fstype=$(findmnt -n -o FSTYPE /)

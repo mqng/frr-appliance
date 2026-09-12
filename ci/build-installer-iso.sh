@@ -90,6 +90,22 @@ for word in $($BB cat /proc/cmdline); do
   esac
 done
 
+# Interactive I/O can only bind to one console, but both boot entries register
+# every console with the kernel, so mirroring status through /dev/kmsg reaches an
+# operator who is watching a different one.
+kmsg() {
+  [ -w /dev/kmsg ] || return 0
+  echo "<4>frr-installer: $*" > /dev/kmsg 2>/dev/null || true
+}
+notify() {
+  echo "$*" || true
+  kmsg "$*"
+}
+halt_forever() {
+  notify "$*"
+  while : ; do $BB sleep 3600; done
+}
+
 # /dev/console follows the kernel console= setting and works for VGA and serial.
 i=0
 while [ "$i" -lt 50 ]; do
@@ -97,23 +113,37 @@ while [ "$i" -lt 50 ]; do
   $BB sleep 1
   i=$((i + 1))
 done
-[ -c /dev/console ] || exit 1
+[ -c /dev/console ] || halt_forever 'No /dev/console; cannot run the installer.'
 exec </dev/console >/dev/console 2>&1
 
+# This runs from initramfs init, and an installer boot carries no root=, so
+# returning to init leaves the kernel with nothing to mount and it panics with
+# "Attempted to kill init". Every failure path must therefore stay in here, and
+# the rescue shell must never be the last thing standing: its stdin is at EOF
+# whenever the selected console has nothing attached to it.
 fail_shell() {
-  echo "ERROR: $*"
-  echo "Dropping to an installer shell."
-  if command -v setsid >/dev/null 2>&1; then
-    exec setsid sh -c 'exec sh -i </dev/console >/dev/console 2>&1'
-  fi
-  exec sh -i </dev/console >/dev/console 2>&1
+  notify "ERROR: $*"
+  notify 'The installer cannot continue on this console.'
+  attempt=0
+  while [ "$attempt" -lt 3 ]; do
+    attempt=$((attempt + 1))
+    echo "Starting a rescue shell (attempt $attempt of 3); 'exit' restarts it."
+    if command -v setsid >/dev/null 2>&1; then
+      setsid sh -i </dev/console >/dev/console 2>&1 || true
+    else
+      sh -i </dev/console >/dev/console 2>&1 || true
+    fi
+  done
+  halt_forever 'No usable console input. Halting; power-cycle to retry.'
 }
+trap 'fail_shell "the installer exited unexpectedly"' EXIT
 
 echo
 echo "FRR Appliance installer"
 echo "======================="
 echo "This writes the complete appliance image and DESTROYS the selected disk."
 echo
+kmsg 'installer started'
 
 modprobe isofs 2>/dev/null || true
 modprobe sr_mod 2>/dev/null || true
@@ -157,41 +187,42 @@ for sysdev in /sys/block/vd* /sys/block/sd* /sys/block/nvme*n* /sys/block/mmcblk
   dev=${sysdev##*/}
   d="/dev/$dev"
   [ -b "$d" ] || continue
-  [ -n "$installer_disk" ] && [ "$d" = "$installer_disk" ] && continue
+  if [ -n "$installer_disk" ] && [ "$d" = "$installer_disk" ]; then continue; fi
   disks="$disks $d"
 done
 set -- $disks
 [ "$#" -gt 0 ] || fail_shell 'No installable disks found'
 
 target=$cmd_target
-if [ -z "$target" ]; then
-  if [ "$#" -eq 1 ]; then
-    target=$1
-  else
-    echo "Available disks:"
-    i=1
-    for d in "$@"; do
-      echo "  $i) $d"
-      i=$((i + 1))
-    done
-    printf 'Select target number: '
-    IFS= read -r choice || fail_shell 'Console input unavailable'
-    i=1
-    for d in "$@"; do
-      if [ "$i" = "$choice" ]; then target=$d; break; fi
-      i=$((i + 1))
-    done
-  fi
+if [ -z "$target" ] && [ "$#" -eq 1 ]; then
+  target=$1
 fi
+# Re-prompt on a mistyped selection rather than treating it as a fatal error.
+while [ -z "$target" ]; do
+  echo "Available disks:"
+  i=1
+  for d in "$@"; do
+    echo "  $i) $d"
+    i=$((i + 1))
+  done
+  printf 'Select target number: '
+  IFS= read -r choice || fail_shell 'Console input unavailable'
+  i=1
+  for d in "$@"; do
+    if [ "$i" = "$choice" ]; then target=$d; fi
+    i=$((i + 1))
+  done
+  [ -n "$target" ] || echo "Not one of the listed numbers: $choice"
+done
 
 valid=0
 for d in "$@"; do
-  [ "$target" = "$d" ] && valid=1
+  if [ "$target" = "$d" ]; then valid=1; fi
 done
 [ "$valid" -eq 1 ] && [ -b "$target" ] || fail_shell "Invalid or unsafe target: $target"
 
-echo "Target: $target"
-echo "FRR_APPLIANCE_INSTALLER=READY"
+notify "Target: $target"
+notify 'FRR_APPLIANCE_INSTALLER=READY'
 
 if [ "$autoinstall" -ne 1 ]; then
   printf 'Type ERASE to continue: '
@@ -199,11 +230,13 @@ if [ "$autoinstall" -ne 1 ]; then
   [ "$confirm" = ERASE ] || fail_shell 'Installation cancelled'
 fi
 
-echo "Writing appliance image to $target ..."
+notify "Writing appliance image to $target ..."
 $BB gzip -dc appliance.img.gz | $BB dd of="$target" bs=4M
 $BB sync
-echo 'Install complete. Rebooting.'
+notify 'Install complete. Rebooting.'
+trap - EXIT
 $BB reboot -f
+halt_forever 'Reboot failed; power-cycle the machine.'
 INSTALLER
 chmod 0755 "$conf/scripts/init-premount/appliance-installer"
 
@@ -256,35 +289,54 @@ xorriso -osirrox on -indev "$base_iso" \
   -extract /isolinux/txt.cfg "$workdir/txt.cfg.orig" \
   -extract /boot/grub/grub.cfg "$workdir/grub.cfg.orig" >/dev/null 2>&1
 
+# Both entries register both consoles with the kernel so that kernel output and
+# the installer's /dev/kmsg status lines are always visible on either one. Only
+# the order differs, and the last console= is the one /dev/console binds to, so
+# that is what selects where the installer reads its answers from. VGA is the
+# default because a serial-only operator can see and pick from these menus,
+# whereas someone on VGA cannot see a menu that is being driven over serial.
 cat > "$workdir/txt.cfg" <<'TXT'
-default appliance-serial
+default appliance-vga
+label appliance-vga
+  menu label ^Install FRR Appliance (VGA console, ERASE DISK)
+  kernel /appliance/vmlinuz
+  append initrd=/appliance/installer-initrd.gz appliance.installer=1 console=ttyS0,115200n8 console=tty0
 label appliance-serial
-  menu label ^Install FRR Appliance (Serial, ERASE DISK)
+  menu label Install FRR Appliance (^Serial console 115200 8N1, ERASE DISK)
   kernel /appliance/vmlinuz
   append initrd=/appliance/installer-initrd.gz appliance.installer=1 console=tty0 console=ttyS0,115200n8
-label appliance-vga
-  menu label Install FRR Appliance (^VGA, ERASE DISK)
-  kernel /appliance/vmlinuz
-  append initrd=/appliance/installer-initrd.gz appliance.installer=1 console=tty0
 TXT
 cat "$workdir/txt.cfg.orig" >> "$workdir/txt.cfg"
 
+# Plain text prompt on purpose: it renders over serial, and unlike ui menu.c32 it
+# cannot depend on a syslinux module that may not be present on the base ISO.
 cat > "$workdir/isolinux.cfg" <<'ISOLINUX'
-default appliance-serial
-prompt 0
-timeout 50
+serial 0 115200
+say
+say FRR Appliance installer -- every option ERASES the selected disk
+say   [Enter]          install, interactive on the VGA console
+say   appliance-serial install, interactive on serial (115200 8N1)
+say   install          Debian installer
+say
+default appliance-vga
+prompt 1
+timeout 100
 include txt.cfg
 ISOLINUX
 
 cat > "$workdir/grub.cfg" <<'GRUB'
+if serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1; then
+    terminal_input --append serial
+    terminal_output --append serial
+fi
 set default=0
-set timeout=5
-menuentry 'Install FRR Appliance (Serial, ERASE DISK)' {
-    linux /appliance/vmlinuz appliance.installer=1 console=tty0 console=ttyS0,115200n8
+set timeout=10
+menuentry 'Install FRR Appliance (VGA console, ERASE DISK)' {
+    linux /appliance/vmlinuz appliance.installer=1 console=ttyS0,115200n8 console=tty0
     initrd /appliance/installer-initrd.gz
 }
-menuentry 'Install FRR Appliance (VGA, ERASE DISK)' {
-    linux /appliance/vmlinuz appliance.installer=1 console=tty0
+menuentry 'Install FRR Appliance (serial console 115200 8N1, ERASE DISK)' {
+    linux /appliance/vmlinuz appliance.installer=1 console=tty0 console=ttyS0,115200n8
     initrd /appliance/installer-initrd.gz
 }
 GRUB

@@ -5,6 +5,12 @@ variant=${1:?usage: provision-rootfs.sh <vanilla|vpp>}
 case "$variant" in vanilla|vpp) ;; *) exit 2 ;; esac
 export DEBIAN_FRONTEND=noninteractive
 
+# Runner containers commonly run with umask 0000, which would make every file
+# this script creates world-writable. Systemd refuses to treat world-writable
+# unit files as sane configuration and a world-writable /etc is an escalation
+# path, so pin the umask instead of relying on the caller's.
+umask 0022
+
 . /etc/os-release
 suite=${VERSION_CODENAME:?}
 
@@ -14,15 +20,45 @@ if [[ "$variant" == vpp ]]; then
 fi
 
 install -d -m 0755 /etc/appliance /usr/local/sbin /etc/sudoers.d
-cp -a /tmp/config/common/etc/. /etc/
+
+# Git only carries an executable bit, and checkout umasks vary across runners, so
+# cp -a would faithfully reproduce mode 0666 for every shipped config file.
+# Narrow the modes of everything copied. Only ever remove bits, so files with a
+# deliberately tighter mode keep it.
+copy_config() {
+  local tree=$1
+  cp -a "$tree/." /etc/
+  (cd "$tree" && find . -mindepth 1 -type d -printf '%P\0') |
+    while IFS= read -r -d '' path; do chmod go-w "/etc/$path"; done
+  (cd "$tree" && find . -type f -printf '%P\0') |
+    while IFS= read -r -d '' path; do chmod go-w,a-x "/etc/$path"; done
+}
+copy_config /tmp/config/common/etc
 if [[ "$variant" == vpp ]]; then
-  cp -a /tmp/config/vpp/etc/. /etc/
+  copy_config /tmp/config/vpp/etc
+
+  # 20-appliance.conf resets After= so vpp.service stops ordering itself behind
+  # network.target, which frr.service orders itself before. If the packaged unit
+  # ever gains ordering we genuinely need, that reset would silently drop it, so
+  # fail the build and force a review instead.
+  vpp_unit=$(dpkg -L vpp | grep -E '/systemd/system/vpp\.service$' | head -1 || true)
+  [[ -n "$vpp_unit" && -r "$vpp_unit" ]] || { echo 'packaged vpp.service not found' >&2; exit 1; }
+  vpp_unreviewed_after=$(sed -n 's/^After=//p' "$vpp_unit" | tr ' ' '\n' |
+    grep -v -e '^network\.target$' -e '^$' || true)
+  [[ -z "$vpp_unreviewed_after" ]] || {
+    echo "Unreviewed ordering in packaged vpp.service: $vpp_unreviewed_after" >&2
+    exit 1
+  }
 fi
 
-# Git only carries an executable bit, and checkout umasks vary across runners.
-# Systemd refuses to treat world-writable unit files as a sane configuration.
-find /etc/systemd/system -type d -exec chmod 0755 {} +
-find /etc/systemd/system -type f -exec chmod 0644 {} +
+# libpam-pwquality checks every new password against the cracklib dictionary, and
+# 99-appliance.conf enforces the policy for root as well. Without the generated
+# dictionary no password is ever accepted, so first boot could never finish.
+update-cracklib >/dev/null
+compgen -G '/var/cache/cracklib/cracklib_dict.*' >/dev/null || {
+  echo 'cracklib dictionary was not generated' >&2
+  exit 1
+}
 
 for s in frr-login appliance-firstboot appliance-grow-root appliance-selftest appliance-info appliance-identity; do
   install -m 0755 "/tmp/scripts/$s" "/usr/local/sbin/$s"

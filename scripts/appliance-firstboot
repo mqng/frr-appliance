@@ -10,12 +10,15 @@ flock 9
 echo
 echo "FRR Appliance first boot"
 echo "------------------------"
-read -r -p "Hostname [router]: " hostname
-hostname=${hostname:-router}
-if [[ ! "$hostname" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$ ]]; then
-  echo "Invalid hostname" >&2
-  exit 1
-fi
+hostname=""
+while [[ -z "$hostname" ]]; do
+  read -r -p "Hostname [router]: " hostname
+  hostname=${hostname:-router}
+  if [[ ! "$hostname" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$ ]]; then
+    echo "Invalid hostname: use letters, digits, dots and dashes (max 63 characters)." >&2
+    hostname=""
+  fi
+done
 
 # Set hostname without depending on D-Bus/systemd-hostnamed during early login.
 printf '%s\n' "$hostname" > /etc/hostname
@@ -48,10 +51,25 @@ else
   printf 'hostname %s\n' "$hostname" >> /etc/frr/vtysh.conf
 fi
 
-while true; do
-  echo "Set the admin password (minimum policy is enforced by PAM):"
-  if passwd admin; then break; fi
+echo
+echo "Set the admin password."
+echo "Policy: at least 12 characters, at least 3 of upper/lower/digit/symbol,"
+echo "at most 3 identical characters in a row, and not a dictionary word."
+password_set=0
+for _ in $(seq 1 5); do
+  if passwd admin; then
+    password_set=1
+    break
+  fi
 done
+# Never loop forever here: if the policy cannot be satisfied at all the console
+# would be unusable, and the operator needs to see why.
+if [[ $password_set -ne 1 ]]; then
+  echo >&2
+  echo 'Could not set the admin password, so first boot is not complete.' >&2
+  echo 'Log in again and rerun: sudo appliance-firstboot' >&2
+  exit 1
+fi
 
 install -d -m 0755 /var/lib/appliance
 touch /var/lib/appliance/firstboot.done
