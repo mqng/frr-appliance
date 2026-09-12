@@ -21,4 +21,11 @@ grep -q 'unexpected interactive Debian Installer prompt' ci/build.sh || { echo '
 grep -q 'debian-installer/exit/poweroff boolean true' ci/preseed.cfg || { echo 'Installer completion is not unattended' >&2; exit 1; }
 grep -q 'passwd/make-user boolean false' ci/preseed.cfg || { echo 'Installer account creation is not disabled' >&2; exit 1; }
 
+if grep -RInE --exclude='static-check.sh' -- '-cpu[[:space:]]+max' ci; then
+  echo 'Do not use QEMU -cpu max in TCG CI; use the reviewed named model' >&2
+  exit 1
+fi
+
+grep -q -- '-cpu Nehalem' ci/smoke-test.sh || { echo 'TCG smoke-test CPU model missing' >&2; exit 1; }
+
 echo STATIC_CHECKS=PASS

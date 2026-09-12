@@ -108,13 +108,15 @@ chmod 0750 /var/log/frr
 mkdir -p /etc/default/grub.d
 if [[ "$variant" == vpp ]]; then
   cat > /etc/default/grub.d/99-appliance.cfg <<'GRUB'
-GRUB_CMDLINE_LINUX_DEFAULT="console=tty0 console=ttyS0,115200n8 intel_iommu=on iommu=pt"
+GRUB_CMDLINE_LINUX="console=tty0 console=ttyS0,115200n8"
+GRUB_CMDLINE_LINUX_DEFAULT="intel_iommu=on iommu=pt"
 GRUB_TERMINAL="console serial"
 GRUB_SERIAL_COMMAND="serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1"
 GRUB
 else
   cat > /etc/default/grub.d/99-appliance.cfg <<'GRUB'
-GRUB_CMDLINE_LINUX_DEFAULT="console=tty0 console=ttyS0,115200n8"
+GRUB_CMDLINE_LINUX="console=tty0 console=ttyS0,115200n8"
+GRUB_CMDLINE_LINUX_DEFAULT=""
 GRUB_TERMINAL="console serial"
 GRUB_SERIAL_COMMAND="serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1"
 GRUB

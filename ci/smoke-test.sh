@@ -28,7 +28,7 @@ boot_wait() {
   qemu-system-x86_64 "$@" >"$log" 2>&1 &
   pid=$!
 
-  for _ in $(seq 1 "$boot_timeout"); do
+  for second in $(seq 1 "$boot_timeout"); do
     if grep -q 'APPLIANCE_SELFTEST=PASS' "$log"; then
       ok=1
       break
@@ -39,6 +39,17 @@ boot_wait() {
     fi
 
     if ! kill -0 "$pid" 2>/dev/null; then
+      break
+    fi
+
+    # Once GRUB hands off to Linux, serial kernel output should appear quickly.
+    # Fail early instead of burning the full CI timeout on a kernel/console hang.
+    if [[ $second -eq 120 ]] && ! grep -Eq 'Linux version|APPLIANCE_SELFTEST=START' "$log"; then
+      echo "$label kernel handoff produced no serial output after 120 seconds" >&2
+      break
+    fi
+
+    if grep -Eq 'Kernel panic|Entering emergency mode|You are in emergency mode' "$log"; then
       break
     fi
 
@@ -75,7 +86,7 @@ common=(
 )
 
 if [[ ${QEMU_ACCEL:-tcg} == "tcg" ]]; then
-  common+=( -cpu max,-la57 )
+  common+=( -cpu Nehalem )
 fi
 
 boot_wait bios "${common[@]}"
@@ -128,7 +139,7 @@ if [[ -n "$code" && -n "$vars" ]]; then
   )
 
   if [[ ${QEMU_ACCEL:-tcg} == "tcg" ]]; then
-    uefi+=( -cpu max )
+    uefi+=( -cpu Nehalem )
   fi
 
   boot_wait uefi "${uefi[@]}"
@@ -159,7 +170,7 @@ iso_args=(
 )
 
 if [[ ${QEMU_ACCEL:-tcg} == "tcg" ]]; then
-  iso_args+=( -cpu max )
+  iso_args+=( -cpu Nehalem )
 fi
 
 qemu-system-x86_64 "${iso_args[@]}" >"$iso_log" 2>&1 &

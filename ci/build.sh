@@ -53,7 +53,9 @@ qemu_args=(
   -no-reboot
 )
 if [[ "$accel" == tcg ]]; then
-  qemu_args+=( -cpu max,-la57 )
+  # Use a conservative named CPU under TCG. Nehalem includes SSE4.2, which
+  # is the DPDK baseline, without exposing the synthetic `max` feature set.
+  qemu_args+=( -cpu Nehalem )
 fi
 
 install_log="$workdir/install-console.log"
