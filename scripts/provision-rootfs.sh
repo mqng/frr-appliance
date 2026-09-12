@@ -5,6 +5,12 @@ variant=${1:?usage: provision-rootfs.sh <vanilla|vpp>}
 case "$variant" in vanilla|vpp) ;; *) exit 2 ;; esac
 export DEBIAN_FRONTEND=noninteractive
 
+# fakechroot preserves the CI runner HOME, which does not exist inside the
+# target rootfs. Give GnuPG an explicit writable home so key inspection does
+# not depend on the runner account.
+export GNUPGHOME=/tmp/appliance-gnupg
+install -d -m 0700 "$GNUPGHOME"
+
 . /etc/os-release
 suite=${VERSION_CODENAME:?}
 

@@ -11,7 +11,7 @@ allowed=(
   3D9968AC9AE7BE1169288DDB1FD5839895F57FDA
   BBC9ACA9D13025A2C186FF7F741E92A1F6E3975B
 )
-mapfile -t fetched < <(gpg --batch --show-keys --with-colons /tmp/frrouting.gpg | awk -F: '
+mapfile -t fetched < <(gpg --homedir "${GNUPGHOME:?}" --batch --show-keys --with-colons /tmp/frrouting.gpg | awk -F: '
   $1=="pub" {want=1; next}
   $1=="fpr" && want {print toupper($10); want=0}
 ')
