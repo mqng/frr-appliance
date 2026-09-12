@@ -32,6 +32,7 @@ install -m 0755 /opt/frr-appliance-build/scripts/frr-login /usr/local/sbin/frr-l
 install -m 0755 /opt/frr-appliance-build/scripts/appliance-firstboot /usr/local/sbin/appliance-firstboot
 install -m 0755 /opt/frr-appliance-build/scripts/appliance-grow-root /usr/local/sbin/appliance-grow-root
 install -m 0755 /opt/frr-appliance-build/scripts/appliance-selftest /usr/local/sbin/appliance-selftest
+install -m 0755 /opt/frr-appliance-build/scripts/appliance-boot-beacon /usr/local/sbin/appliance-boot-beacon
 install -m 0755 /opt/frr-appliance-build/scripts/appliance-info /usr/local/sbin/appliance-info
 install -m 0755 /opt/frr-appliance-build/scripts/appliance-identity /usr/local/sbin/appliance-identity
 if [[ "$variant" == vpp ]]; then
@@ -78,6 +79,20 @@ ConditionPathExists=!/var/lib/appliance/root-grown
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/appliance-grow-root
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+cat > /etc/systemd/system/appliance-boot-beacon.service <<'UNIT'
+[Unit]
+Description=FRR appliance CI boot beacon
+After=systemd-udevd.service local-fs.target
+Before=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/appliance-boot-beacon
 
 [Install]
 WantedBy=multi-user.target
@@ -165,7 +180,7 @@ fi
 grep -E '^[[:space:]]*linux[[:space:]]' /boot/grub/grub.cfg | head -3 || true
 update-initramfs -u -k all
 
-systemctl enable ssh nftables chrony auditd apparmor frr appliance-identity.service appliance-grow-root.service appliance-selftest.service serial-getty@ttyS0.service
+systemctl enable ssh nftables chrony auditd apparmor frr appliance-identity.service appliance-grow-root.service appliance-boot-beacon.service appliance-selftest.service serial-getty@ttyS0.service
 if [[ "$variant" == vpp ]]; then
   systemctl enable vpp vpp-dpdk-prepare.service vpp-lcp.service
 fi

@@ -20,22 +20,37 @@ boot_wait() {
 
   local log="$workdir/$label.log"
   local result="$workdir/$label.selftest"
+  local qemu_debug="$workdir/$label.qemu-debug.log"
   local pid
+  local ready=0
   local ok=0
+  local ready_deadline=$((SECONDS + 240))
+  local test_deadline=0
 
   : > "$log"
   : > "$result"
+  : > "$qemu_debug"
 
   qemu-system-x86_64 \
     "$@" \
     -device virtio-serial-pci \
     -chardev "file,id=appliance_selftest,path=$result" \
     -device virtserialport,chardev=appliance_selftest,name=org.frr.appliance.selftest \
+    -d guest_errors,cpu_reset \
+    -D "$qemu_debug" \
     >"$log" 2>&1 &
   pid=$!
 
-  for _ in $(seq 1 "$boot_timeout"); do
-    # Primary result channel: independent from ttyS0/GRUB console behavior.
+  while kill -0 "$pid" 2>/dev/null; do
+    if grep -q 'APPLIANCE_BOOT=READY' "$result" 2>/dev/null; then
+      if [[ $ready -eq 0 ]]; then
+        ready=1
+        # FRR itself may need up to two minutes to settle; start this
+        # deadline only after Linux userspace is known to be alive.
+        test_deadline=$((SECONDS + 300))
+      fi
+    fi
+
     if grep -q 'APPLIANCE_SELFTEST=PASS' "$result" 2>/dev/null; then
       ok=1
       break
@@ -44,18 +59,12 @@ boot_wait() {
       break
     fi
 
-    # Keep console markers as a fallback and for useful diagnostics.
-    if grep -q 'APPLIANCE_SELFTEST=PASS' "$log"; then
-      ok=1
+    if [[ $ready -eq 0 && $SECONDS -ge $ready_deadline ]]; then
+      echo "$label did not reach Linux userspace" >&2
       break
     fi
-    if grep -q 'APPLIANCE_SELFTEST=FAIL' "$log"; then
-      break
-    fi
-    if grep -Eq 'Kernel panic|Entering emergency mode|You are in emergency mode' "$log"; then
-      break
-    fi
-    if ! kill -0 "$pid" 2>/dev/null; then
+    if [[ $ready -eq 1 && $SECONDS -ge $test_deadline ]]; then
+      echo "$label reached userspace but appliance self-test timed out" >&2
       break
     fi
 
@@ -68,11 +77,13 @@ boot_wait() {
   if [[ $ok -ne 1 ]]; then
     echo "$label boot self-test failed" >&2
     if [[ -s "$result" ]]; then
-      echo "--- appliance self-test channel ---" >&2
+      echo "--- appliance result channel ---" >&2
       cat "$result" >&2 || true
     fi
     echo "--- serial console ---" >&2
     tail -200 "$log" >&2 || true
+    echo "--- qemu debug ---" >&2
+    tail -100 "$qemu_debug" >&2 || true
     return 1
   fi
 }

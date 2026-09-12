@@ -25,6 +25,7 @@ grep -q 'passwd/make-user boolean false' ci/preseed.cfg || { echo 'Installer acc
 # while a serial-only harness appears stuck after GRUB's initramfs message.
 grep -q 'org.frr.appliance.selftest' ci/smoke-test.sh || { echo 'Dedicated self-test channel missing' >&2; exit 1; }
 grep -q 'org.frr.appliance.selftest' scripts/appliance-selftest || { echo 'Guest self-test result channel missing' >&2; exit 1; }
+grep -q 'APPLIANCE_BOOT=READY' scripts/appliance-boot-beacon || { echo 'Early boot beacon missing' >&2; exit 1; }
 grep -q 'generated GRUB config has no ttyS0 kernel console' scripts/provision.sh || { echo 'GRUB serial-console build assertion missing' >&2; exit 1; }
 
 echo STATIC_CHECKS=PASS

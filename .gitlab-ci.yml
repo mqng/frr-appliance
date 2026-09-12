@@ -34,6 +34,7 @@ variables:
       - work/*/http.log
       - work/*/http/preseed.cfg
       - work/*/smoke/*.log
+      - work/*/smoke/*.qemu-debug.log
       - work/*/smoke/*.selftest
   rules:
     - if: '$CI_PIPELINE_SOURCE == "schedule"'
