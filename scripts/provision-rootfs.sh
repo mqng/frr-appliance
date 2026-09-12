@@ -19,6 +19,11 @@ if [[ "$variant" == vpp ]]; then
   cp -a /tmp/config/vpp/etc/. /etc/
 fi
 
+# Git only carries an executable bit, and checkout umasks vary across runners.
+# Systemd refuses to treat world-writable unit files as a sane configuration.
+find /etc/systemd/system -type d -exec chmod 0755 {} +
+find /etc/systemd/system -type f -exec chmod 0644 {} +
+
 for s in frr-login appliance-firstboot appliance-grow-root appliance-selftest appliance-info appliance-identity; do
   install -m 0755 "/tmp/scripts/$s" "/usr/local/sbin/$s"
 done

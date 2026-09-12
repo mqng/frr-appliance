@@ -5,9 +5,9 @@ apt-get update
 apt-get install -y --no-install-recommends \
   ca-certificates curl debian-keyring debian-archive-keyring gnupg gpgv jq \
   mmdebstrap \
-  parted dosfstools e2fsprogs util-linux \
+  parted dosfstools e2fsprogs util-linux udev \
   qemu-system-x86 qemu-utils ovmf \
-  xorriso cpio gzip zstd python3 coreutils file passwd
+  xorriso gzip zstd python3 coreutils file passwd
 rm -rf /var/lib/apt/lists/*
 
 # Fail before downloading a Debian rootfs if this hosted runner cannot attach

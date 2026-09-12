@@ -13,17 +13,23 @@ workdir="$PWD/work/${variant}/installer-iso"
 rm -rf "$workdir"
 mkdir -p "$workdir"
 
-name=$(basename "$raw_img")
 gzip -1 -c "$raw_img" > "$workdir/appliance.img.gz"
 sha256sum "$workdir/appliance.img.gz" | sed 's#  .*/#  #' > "$workdir/SHA256SUMS"
 
-# Reuse the finished appliance kernel and initramfs. The installer runs entirely
-# from early userspace and writes the exact appliance image carried on the ISO.
+# Build a separate installer initramfs through initramfs-tools itself. Do not
+# append cpio data to the appliance initramfs: initramfs-tools generates ORDER
+# files for each boot-script stage, and bypassing mkinitramfs can leave those
+# directories structurally invalid.
 mnt=$(mktemp -d)
 loopdev=""
 cleanup() {
   set +e
-  mountpoint -q "$mnt" && umount "$mnt"
+  mountpoint -q "$mnt/run" && umount "$mnt/run" || true
+  mountpoint -q "$mnt/sys" && umount -R "$mnt/sys" || true
+  mountpoint -q "$mnt/proc" && umount "$mnt/proc" || true
+  mountpoint -q "$mnt/dev" && umount -R "$mnt/dev" || true
+  mountpoint -q "$mnt/tmp" && umount "$mnt/tmp" || true
+  mountpoint -q "$mnt" && umount "$mnt" || true
   [[ -n "$loopdev" ]] && losetup -d "$loopdev" 2>/dev/null || true
   rmdir "$mnt" 2>/dev/null || true
 }
@@ -37,20 +43,24 @@ mount -o ro "/dev/${base}p3" "$mnt"
 kernel=$(find "$mnt/boot" -maxdepth 1 -type f -name 'vmlinuz-*' -printf '%f\n' | sort -V | tail -1)
 [[ -n "$kernel" ]] || { echo 'No appliance kernel found' >&2; exit 1; }
 version=${kernel#vmlinuz-}
-initrd="initrd.img-${version}"
-[[ -f "$mnt/boot/$initrd" ]] || { echo "No matching appliance initramfs: $initrd" >&2; exit 1; }
-
+[[ -d "$mnt/lib/modules/$version" ]] || { echo "No modules for appliance kernel: $version" >&2; exit 1; }
 cp "$mnt/boot/$kernel" "$workdir/vmlinuz"
-cp "$mnt/boot/$initrd" "$workdir/installer-initrd.gz"
-umount "$mnt"
-losetup -d "$loopdev"
-loopdev=""
 
-# Add one initramfs-tools init-premount script. Linux supports concatenated
-# compressed cpio archives, so the signed Debian-generated initramfs stays intact.
-overlay="$workdir/initramfs-overlay"
-mkdir -p "$overlay/scripts/init-premount"
-cat > "$overlay/scripts/init-premount/appliance-installer" <<'INSTALLER'
+# Keep the appliance filesystem read-only. Writable build state lives only on
+# tmpfs and temporary virtual filesystems mounted into the chroot.
+mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs "$mnt/tmp"
+mount --rbind /dev "$mnt/dev"
+mount --make-rslave "$mnt/dev"
+mount -t proc proc "$mnt/proc"
+mount --rbind /sys "$mnt/sys"
+mount --make-rslave "$mnt/sys"
+mount -t tmpfs -o mode=0755,nosuid,nodev tmpfs "$mnt/run"
+
+conf="$mnt/tmp/installer-initramfs-tools"
+mkdir -p "$conf"
+cp -a "$mnt/etc/initramfs-tools/." "$conf/"
+mkdir -p "$conf/scripts/init-premount"
+cat > "$conf/scripts/init-premount/appliance-installer" <<'INSTALLER'
 #!/bin/sh
 set -eu
 
@@ -193,11 +203,50 @@ $BB sync
 echo 'Install complete. Rebooting.'
 $BB reboot -f
 INSTALLER
-chmod 0755 "$overlay/scripts/init-premount/appliance-installer"
-(
-  cd "$overlay"
-  find . -print0 | cpio --null --quiet -o -H newc | gzip -9
-) >> "$workdir/installer-initrd.gz"
+chmod 0755 "$conf/scripts/init-premount/appliance-installer"
+
+# Ensure the installer can see both optical/USB media and common target disks
+# regardless of which subset the normal appliance needs for its root filesystem.
+cat >> "$conf/modules" <<'MODULES'
+sr_mod
+isofs
+ahci
+virtio_pci
+virtio_blk
+nvme
+MODULES
+
+mkdir -p "$mnt/tmp/installer-tmp"
+chroot "$mnt" /usr/bin/env \
+  SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-0}" \
+  TMPDIR=/tmp/installer-tmp \
+  mkinitramfs \
+    -d /tmp/installer-initramfs-tools \
+    -o /tmp/installer-initrd \
+    "$version"
+
+# Validate the generated initramfs structure before publishing the ISO.
+listing="$workdir/installer-initrd.list"
+chroot "$mnt" lsinitramfs /tmp/installer-initrd > "$listing"
+grep -Eq '(^|/)scripts/init-premount/ORDER$' "$listing" || {
+  echo 'Generated installer initramfs is missing init-premount/ORDER' >&2
+  exit 1
+}
+grep -Eq '(^|/)scripts/init-premount/appliance-installer$' "$listing" || {
+  echo 'Generated installer initramfs is missing appliance-installer' >&2
+  exit 1
+}
+cp "$mnt/tmp/installer-initrd" "$workdir/installer-initrd.gz"
+
+# Release all chroot mounts before xorriso starts reading the finished payload.
+umount "$mnt/run"
+umount -R "$mnt/sys"
+umount "$mnt/proc"
+umount -R "$mnt/dev"
+umount "$mnt/tmp"
+umount "$mnt"
+losetup -d "$loopdev"
+loopdev=""
 
 # Preserve Debian's proven hybrid BIOS/UEFI boot layout, replacing only the menus
 # and adding our kernel, initramfs, and appliance payload.
