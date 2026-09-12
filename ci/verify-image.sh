@@ -38,6 +38,18 @@ grep -Eq "root=UUID=${root_uuid}([[:space:]]|$)" "$mnt/boot/grub/grub.cfg"
 ! grep -Eq 'root=/dev/loop[0-9]+p?[0-9]*' "$mnt/boot/grub/grub.cfg"
 grep -q 'console=ttyS0,115200n8' "$mnt/boot/grub/grub.cfg"
 chroot "$mnt" dpkg-query -W frr >/dev/null
+chroot "$mnt" dpkg-query -W snmpd >/dev/null
+test -s "$mnt/etc/audit/rules.d/10-appliance.rules"
+grep -q 'audit=1' "$mnt/boot/grub/grub.cfg"
+grep -q 'APT::Periodic::Unattended-Upgrade "0"' "$mnt/etc/apt/apt.conf.d/20auto-upgrades"
+[[ ! -e "$mnt/etc/apt/apt.conf.d/21appliance-auto-upgrades" ]]
+
+for unit in ssh nftables auditd frr appliance-selftest.service \
+            appliance-update-check.timer tmp.mount; do
+  chroot "$mnt" systemctl is-enabled "$unit" >/dev/null
+done
+# available, not enabled
+! chroot "$mnt" systemctl is-enabled snmpd.service >/dev/null
 if [[ "$variant" == vpp ]]; then
   chroot "$mnt" dpkg-query -W vpp >/dev/null
   test -s "$mnt/etc/appliance/vpp-dpdk.conf"

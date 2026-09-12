@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# container /dev is stale, so make the nodes losetup and grub want
 ensure_loop_nodes() {
-  # GitLab's privileged Docker executor can create loop devices in the host
-  # kernel while the container has a stale snapshot of /dev. Create the
-  # canonical device nodes explicitly so losetup/grub see /dev/loopN paths.
   if [[ ! -e /dev/loop-control ]]; then
     mknod -m 0660 /dev/loop-control c 10 237 || {
-      echo 'Cannot create /dev/loop-control; runner is not privileged enough for image assembly' >&2
+      echo 'cannot create /dev/loop-control; runner is not privileged' >&2
       return 1
     }
   fi
@@ -15,7 +13,7 @@ ensure_loop_nodes() {
   for i in $(seq 0 127); do
     if [[ ! -e "/dev/loop$i" ]]; then
       mknod -m 0660 "/dev/loop$i" b 7 "$i" || {
-        echo "Cannot create /dev/loop$i; runner is not privileged enough for image assembly" >&2
+        echo "cannot create /dev/loop$i; runner is not privileged" >&2
         return 1
       }
     fi
@@ -59,8 +57,7 @@ create_partition_nodes() {
     part="${base}p${i}"
     sysdev="/sys/class/block/$part/dev"
     node="/dev/$part"
-    # A previous loop attachment can leave a stale partition node in /dev.
-    # Recreate it from the kernel's current sysfs major/minor pair.
+    # stale node from an earlier attach, rebuild from sysfs
     rm -f "$node"
     for _ in $(seq 1 50); do
       if [[ -r "$sysdev" ]]; then
@@ -73,7 +70,7 @@ create_partition_nodes() {
       sleep 0.1
     done
     [[ -b "$node" ]] || {
-      echo "Partition device did not appear: $part" >&2
+      echo "partition device did not appear: $part" >&2
       return 1
     }
   done

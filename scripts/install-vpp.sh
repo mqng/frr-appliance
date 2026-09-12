@@ -2,8 +2,9 @@
 set -euo pipefail
 
 suite=${1:?}
+# nothing newer on packagecloud
 [[ "$suite" == bookworm ]] || {
-  echo 'VPP release packages are restricted to Debian Bookworm' >&2
+  echo "no fd.io VPP packages for $suite" >&2
   exit 1
 }
 
@@ -31,9 +32,7 @@ APT
 
 apt-get update
 
-# VPP's package postinst normally applies its sysctl settings immediately.
-# During image construction we must not modify the CI runner's kernel.
-# The sysctl files remain in the image and are applied normally on boot.
+# keep the postinst off the build host's sysctls
 VPP_INSTALL_SKIP_SYSCTL=true \
   apt-get install -y --no-install-recommends \
     vpp \

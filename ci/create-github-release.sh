@@ -1,13 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Publishes the artifacts collected in ./out as a GitHub release.
-#
-# The GitLab pipeline uploads images to the generic package registry and links
-# them from a release (ci/publish.sh, ci/create-release.sh). GitHub has no
-# equivalent registry, so the files are attached to the release directly. That
-# caps each asset at 2 GiB, which is why the 4 GiB raw image is not published
-# from GitHub; PUBLISH_RAW_IMG defaults to false here.
+# no package registry here, so assets go on the release itself. 2 GiB cap each,
+# hence PUBLISH_RAW_IMG=false
 
 : "${GITHUB_REPOSITORY:?}"
 : "${GITHUB_SHA:?}"
@@ -17,8 +12,6 @@ set -euo pipefail
 
 run_url="${GITHUB_SERVER_URL:-https://github.com}/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
 
-# Mirrors the GitLab version scheme: a tag if we are on one, otherwise the build
-# date plus the run counter.
 if [[ "${GITHUB_REF_TYPE:-}" == tag && -n "${GITHUB_REF_NAME:-}" ]]; then
   version=$GITHUB_REF_NAME
   tag=$GITHUB_REF_NAME
@@ -31,7 +24,6 @@ assets=()
 variants=()
 for variant in vanilla vpp; do
   name="frr-appliance-${variant}-amd64"
-  # A dispatched run can build a single variant, so absent output is not a fault.
   [[ -f "out/$name-SHA256SUMS" ]] || continue
   variants+=("$variant")
 
@@ -50,7 +42,7 @@ for variant in vanilla vpp; do
 
   for file in "${files[@]}"; do
     if [[ ! -f "out/$file" ]]; then
-      echo "Missing release asset: out/$file" >&2
+      echo "missing release asset: out/$file" >&2
       exit 1
     fi
     assets+=("out/$file")
@@ -60,17 +52,17 @@ for variant in vanilla vpp; do
   done
 done
 
-[[ ${#variants[@]} -gt 0 ]] || { echo 'No appliance build output found in ./out' >&2; exit 1; }
+[[ ${#variants[@]} -gt 0 ]] || { echo 'no build output in ./out' >&2; exit 1; }
 
 notes=$(mktemp)
 trap 'rm -f "$notes"' EXIT
 cat > "$notes" <<NOTES
-Automated FRR appliance build from [run $GITHUB_RUN_NUMBER]($run_url).
+FRR appliance build from [run $GITHUB_RUN_NUMBER]($run_url).
 
 - Variants: ${variants[*]}
 - Commit: \`$GITHUB_SHA\`
 
-Verify the checksums and the Sigstore bundles before deploying anything:
+Verify the checksums and signatures before use:
 
 \`\`\`
 sha256sum --check --ignore-missing frr-appliance-vanilla-amd64-SHA256SUMS
@@ -82,14 +74,13 @@ cosign verify-blob frr-appliance-vanilla-amd64.img.zst \\
 \`\`\`
 NOTES
 
-# A re-run must not leave assets from the previous attempt attached, so the
-# release and its tag are recreated rather than amended.
+# recreate on retry
 if gh release view "$tag" >/dev/null 2>&1; then
   gh release delete "$tag" --yes --cleanup-tag
 fi
 
 gh release create "$tag" \
   --target "$GITHUB_SHA" \
-  --title "FRR Appliance $version" \
+  --title "FRR appliance $version" \
   --notes-file "$notes" \
   "${assets[@]}"

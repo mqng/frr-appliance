@@ -1,0 +1,7 @@
+[Unit]
+Description=Check for available updates
+After=network-online.target apt-daily.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/appliance-update-check

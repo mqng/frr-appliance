@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
-cat /etc/appliance/build.env
-printf 'KERNEL_VERSION=%s\n' "$(uname -r)"
-printf 'FRR_RUNTIME_VERSION=%s\n' "$(vtysh -c 'show version' 2>/dev/null | head -1 || true)"
-if command -v vppctl >/dev/null 2>&1; then
-  printf 'VPP_RUNTIME_VERSION=%s\n' "$(vppctl show version 2>/dev/null | head -1 || true)"
-fi
+
+# shellcheck source=/dev/null
+. /etc/appliance/build.env
+
+printf 'variant  %s\n' "$APPLIANCE_VARIANT"
+printf 'built    %s\n' "$APPLIANCE_BUILD_TIME"
+printf 'debian   %s (%s)\n' "$DEBIAN_VERSION" "$DEBIAN_CODENAME"
+printf 'kernel   %s\n' "$(uname -r)"
+printf 'frr      %s\n' "$FRR_VERSION"
+[[ "$VPP_VERSION" == none ]] || printf 'vpp      %s\n' "$VPP_VERSION"

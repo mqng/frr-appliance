@@ -1,0 +1,22 @@
+-D
+-b 8192
+-f 1
+
+-w /etc/passwd -p wa -k identity
+-w /etc/shadow -p wa -k identity
+-w /etc/group -p wa -k identity
+-w /etc/gshadow -p wa -k identity
+-w /etc/sudoers -p wa -k identity
+-w /etc/sudoers.d -p wa -k identity
+
+-w /etc/frr -p wa -k frr
+-w /etc/nftables.conf -p wa -k firewall
+-w /etc/nftables.d -p wa -k firewall
+-w /etc/ssh -p wa -k sshd
+-w /etc/appliance -p wa -k appliance
+
+-w /usr/bin/sudo -p x -k priv
+-w /usr/bin/su -p x -k priv
+
+-a always,exit -F arch=b64 -S init_module,finit_module,delete_module -k modules
+-a always,exit -F arch=b64 -S adjtimex,settimeofday,clock_settime -k time

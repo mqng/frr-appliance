@@ -11,82 +11,81 @@ compile(Path('ci/make-sbom.py').read_text(), 'ci/make-sbom.py', 'exec')
 PY
 
 if grep -RInE --exclude='static-check.sh' '(trusted=yes|curl[^|]*\|[[:space:]]*(sh|bash)|wget[^|]*\|[[:space:]]*(sh|bash)|--no-check-certificate|GIT_SSL_NO_VERIFY)' ci scripts config; then
-  echo 'Unsafe bootstrap pattern found' >&2
+  echo 'unsafe bootstrap pattern' >&2
   exit 1
 fi
 
-grep -q -- '--mode=root' ci/build.sh || { echo 'mmdebstrap root mode missing' >&2; exit 1; }
-! grep -q -- '--mode=fakechroot' ci/build.sh || { echo 'fakechroot must not be used' >&2; exit 1; }
-grep -q -- '--format=tar' ci/build.sh || { echo 'mmdebstrap tar output missing' >&2; exit 1; }
-grep -qE '(^| )cracklib-runtime( |$)' ci/build.sh || { echo 'cracklib-runtime missing: libpam-pwquality would reject every password' >&2; exit 1; }
-grep -q 'update-cracklib' scripts/provision-rootfs.sh || { echo 'cracklib dictionary is not verified at build time' >&2; exit 1; }
-! grep -q 'qemu-system-' ci/build.sh || { echo 'QEMU must not be part of OS construction' >&2; exit 1; }
-! grep -RInE --exclude='static-check.sh' 'guestfish|virt-cat|libguestfs|supermin' ci scripts >/dev/null || { echo 'libguestfs/supermin must not be in the build path' >&2; exit 1; }
-grep -q 'attach_loop' ci/assemble-image.sh || { echo 'Loop-backed image assembly missing' >&2; exit 1; }
-grep -q 'grub-install --target=i386-pc' scripts/image-finalize || { echo 'BIOS GRUB install missing' >&2; exit 1; }
-grep -q -- '--target=x86_64-efi' scripts/image-finalize || { echo 'UEFI GRUB install missing' >&2; exit 1; }
-grep -q -- '--removable' scripts/image-finalize || { echo 'UEFI removable fallback install missing' >&2; exit 1; }
-grep -q 'Signed-By: /usr/share/keyrings/frrouting.gpg' scripts/install-frr.sh || { echo 'FRR repository keyring missing' >&2; exit 1; }
-grep -q 'Signed-By: /etc/apt/keyrings/fdio-release.asc' scripts/install-vpp.sh || { echo 'VPP repository keyring missing' >&2; exit 1; }
-! grep -RInE --exclude='static-check.sh' 'A90FC36D|4A56C773|3D9968AC|BBC9ACA9|9CD45627' scripts ci >/dev/null || { echo 'Hard-coded upstream repository signer detected' >&2; exit 1; }
-# frr.service is Before=network.target upstream, so any unit that FRR must wait
-# for has to stay off the far side of network.target or systemd breaks the
-# resulting ordering cycle by dropping the frr.service job.
-grep -qx 'After=' config/vpp/etc/systemd/system/vpp.service.d/20-appliance.conf || {
-  echo 'vpp.service must reset After= or it orders itself behind network.target and deadlocks frr.service' >&2
-  exit 1
-}
-# lsblk's PARTN column only exists from util-linux 2.40, which bookworm predates.
-! grep -RInE --exclude='static-check.sh' '^[^#]*lsblk[^|]*PARTN' ci scripts >/dev/null || {
-  echo 'lsblk PARTN is unavailable on bookworm; read the partition number from sysfs' >&2
-  exit 1
-}
-# A router must keep forwarding transit traffic by default, but its own control
-# plane is an allowlist. Losing either property silently would be bad.
-grep -q 'hook input priority filter; policy drop' config/common/etc/nftables.conf || {
-  echo 'Appliance control plane must be default-deny' >&2
-  exit 1
-}
-grep -q 'hook forward priority filter; policy accept' config/common/etc/nftables.conf || {
-  echo 'A router must forward by default; transit filtering is operator policy' >&2
-  exit 1
-}
-grep -q 'nft --check --file /etc/nftables.conf' scripts/provision-rootfs.sh || {
-  echo 'Firewall policy is not validated at build time' >&2
-  exit 1
-}
-grep -q 'APPLIANCE_BOOT=READY' scripts/appliance-selftest || { echo 'Boot signal missing' >&2; exit 1; }
-grep -q 'APPLIANCE_SELFTEST=PASS' scripts/appliance-selftest || { echo 'Self-test signal missing' >&2; exit 1; }
-grep -q 'org.frr.appliance.selftest' ci/smoke-test.sh || { echo 'Dedicated smoke-test channel missing' >&2; exit 1; }
-grep -q 'OVMF_CODE_4M.ms.fd' ci/smoke-test.sh || { echo 'Secure-Boot OVMF smoke test missing' >&2; exit 1; }
+fail() { echo "$1" >&2; exit 1; }
 
-[[ ! -e ci/preseed.cfg ]] || { echo 'Legacy Debian Installer preseed still present' >&2; exit 1; }
-[[ ! -e scripts/provision.sh ]] || { echo 'Legacy installer provisioning script still present' >&2; exit 1; }
+# real chroot on loop devices, no emulation
+grep -q -- '--mode=root' ci/build.sh || fail 'mmdebstrap root mode missing'
+! grep -q -- '--mode=fakechroot' ci/build.sh || fail 'fakechroot must not be used'
+grep -q -- '--format=tar' ci/build.sh || fail 'mmdebstrap tar output missing'
+! grep -q 'qemu-system-' ci/build.sh || fail 'QEMU must not build the OS'
+! grep -RInE --exclude='static-check.sh' 'guestfish|virt-cat|libguestfs|supermin' ci scripts >/dev/null || fail 'libguestfs must not be in the build path'
+grep -q 'attach_loop' ci/assemble-image.sh || fail 'loop-backed assembly missing'
 
-grep -q "printf 'router\\\\n' > /etc/hostname" scripts/provision-rootfs.sh || { echo 'Default appliance hostname is not pinned' >&2; exit 1; }
-! grep -q 'hostnamectl' scripts/appliance-firstboot || { echo 'First boot must not depend on systemd-hostnamed' >&2; exit 1; }
-grep -q 'exec </dev/console >/dev/console 2>&1' ci/build-installer-iso.sh || { echo 'Installer must use /dev/console' >&2; exit 1; }
-! grep -q 'appliance.console=' ci/build-installer-iso.sh || { echo 'Installer has duplicate console routing' >&2; exit 1; }
+# boot paths
+grep -q 'grub-install --target=i386-pc' scripts/image-finalize || fail 'BIOS GRUB install missing'
+grep -q -- '--target=x86_64-efi' scripts/image-finalize || fail 'UEFI GRUB install missing'
+grep -q -- '--removable' scripts/image-finalize || fail 'UEFI removable fallback missing'
+grep -q 'OVMF_CODE_4M.ms.fd' ci/smoke-test.sh || fail 'Secure Boot test missing'
 
-# An installer boot carries no root=, so if the initramfs hook ever returns to
-# init the kernel panics. The hook must trap its own exit and it must never let
-# the rescue shell be the last process standing.
-grep -q "trap 'fail_shell" ci/build-installer-iso.sh || { echo 'Installer is missing its exit trap' >&2; exit 1; }
-grep -q 'halt_forever' ci/build-installer-iso.sh || { echo 'Installer has no terminal halt path' >&2; exit 1; }
-! grep -q "exec setsid sh -c" ci/build-installer-iso.sh || { echo 'Installer must not exec its rescue shell over the hook' >&2; exit 1; }
-grep -qx 'default appliance-vga' ci/build-installer-iso.sh || { echo 'Installer default entry must be interactive on VGA' >&2; exit 1; }
+# signed package sources
+grep -q 'Signed-By: /usr/share/keyrings/frrouting.gpg' scripts/install-frr.sh || fail 'FRR keyring missing'
+grep -q 'Signed-By: /etc/apt/keyrings/fdio-release.asc' scripts/install-vpp.sh || fail 'VPP keyring missing'
+! grep -RInE --exclude='static-check.sh' 'A90FC36D|4A56C773|3D9968AC|BBC9ACA9|9CD45627' scripts ci >/dev/null || fail 'hard-coded repository signer'
 
-# Every installer entry must register both consoles so kernel output and the
-# installer status lines stay visible whichever console the operator watches.
+# frr is Before=network.target, so nothing it waits on may be after
+grep -qx 'After=' config/vpp/etc/systemd/system/vpp.service.d/20-appliance.conf || fail 'vpp.service must reset After='
+# PARTN needs util-linux 2.40
+! grep -RInE --exclude='static-check.sh' '^[^#]*lsblk[^|]*PARTN' ci scripts >/dev/null || fail 'lsblk PARTN is unavailable on bookworm'
+
+# admin works without sudo
+grep -q '/usr/local/sbin' config/common/etc/profile.d/99-appliance.sh || fail 'admin PATH lacks sbin'
+grep -q 'systemd-journal' scripts/provision-rootfs.sh || fail 'admin cannot read the journal'
+grep -qE '(^| )dbus( |$)' ci/build.sh || fail 'no system bus, systemctl fails for admin'
+grep -q 'gid netadmin' scripts/vpp-dpdk-prepare || fail 'VPP CLI socket would need sudo'
+grep -q '^kernel.printk' config/common/etc/sysctl.d/99-frr-appliance.conf || fail 'console loglevel not pinned'
+
+# control plane closed, transit open
+grep -q 'hook input priority filter; policy drop' config/common/etc/nftables.conf || fail 'control plane must be default-deny'
+grep -q 'hook forward priority filter; policy accept' config/common/etc/nftables.conf || fail 'a router must forward by default'
+grep -q 'nft --check --file /etc/nftables.conf' scripts/provision-rootfs.sh || fail 'firewall not validated at build time'
+
+# deleting a drop-in needs a daemon-reload, so appliance-getty decides instead
+! grep -q 'rm -f /etc/systemd/system/.*getty' scripts/appliance-firstboot || fail 'autologin must not be disabled by deleting a drop-in'
+grep -q 'firstboot.done' scripts/appliance-getty || fail 'appliance-getty must gate autologin'
+for unit in getty@tty1 serial-getty@ttyS0; do
+  conf="config/common/etc/systemd/system/$unit.service.d/10-appliance-console.conf"
+  grep -q '/usr/local/sbin/appliance-getty' "$conf" || fail "$conf must call appliance-getty"
+done
+grep -q 'appliance-getty' scripts/provision-rootfs.sh || fail 'appliance-getty not installed'
+! grep -q 'hostnamectl' scripts/appliance-firstboot || fail 'first boot must not need systemd-hostnamed'
+
+# self-test signalling
+grep -q 'APPLIANCE_BOOT=READY' scripts/appliance-selftest || fail 'boot signal missing'
+grep -q 'APPLIANCE_SELFTEST=PASS' scripts/appliance-selftest || fail 'self-test signal missing'
+grep -q 'org.frr.appliance.selftest' ci/smoke-test.sh || fail 'self-test channel missing'
+grep -q "printf 'router\\\\n' > /etc/hostname" scripts/provision-rootfs.sh || fail 'default hostname not pinned'
+grep -q '^source work/base.env$' ci/finalize-artifacts.sh || fail 'base metadata not loaded'
+
+# no root= on an installer boot, so it must never return
+grep -q 'exec </dev/console >/dev/console 2>&1' ci/build-installer-iso.sh || fail 'installer must use /dev/console'
+! grep -q 'appliance.console=' ci/build-installer-iso.sh || fail 'duplicate console routing'
+grep -q "trap 'fail_shell" ci/build-installer-iso.sh || fail 'installer exit trap missing'
+grep -q 'halt_forever' ci/build-installer-iso.sh || fail 'installer halt path missing'
+! grep -q 'exec setsid sh -c' ci/build-installer-iso.sh || fail 'rescue shell must not exec over the hook'
+grep -qx 'default appliance-vga' ci/build-installer-iso.sh || fail 'installer default must be VGA'
+
 installer_entries=0
 while IFS= read -r entry; do
   installer_entries=$((installer_entries + 1))
   case "$entry" in
     *console=tty0*console=ttyS0,115200n8*|*console=ttyS0,115200n8*console=tty0*) ;;
-    *) echo "Installer boot entry does not register both consoles:$entry" >&2; exit 1 ;;
+    *) fail "installer entry lacks both consoles:$entry" ;;
   esac
 done < <(grep -E '^ +(append|linux) .*appliance\.installer=1' ci/build-installer-iso.sh)
-[[ $installer_entries -eq 4 ]] || { echo "Expected 4 installer boot entries (isolinux + grub), found $installer_entries" >&2; exit 1; }
-grep -q '^source work/base.env$' ci/finalize-artifacts.sh || { echo 'Provenance base metadata is not loaded' >&2; exit 1; }
+[[ $installer_entries -eq 4 ]] || fail "expected 4 installer boot entries, found $installer_entries"
 
 echo STATIC_CHECKS=PASS

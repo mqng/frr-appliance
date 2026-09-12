@@ -18,8 +18,7 @@ case "$variant" in
   *) exit 2 ;;
 esac
 
-# The Debian ISO is used only as the small boot environment for the bare-metal
-# installer. The appliance rootfs itself comes directly from signed APT repos.
+# ISO is only the installer boot env, rootfs comes from apt
 curl --fail --location --retry 4 --retry-all-errors --proto '=https' --tlsv1.2 \
   "$base_url/SHA512SUMS" -o work/base/SHA512SUMS
 curl --fail --location --retry 4 --retry-all-errors --proto '=https' --tlsv1.2 \
@@ -46,7 +45,7 @@ curl --fail --location --retry 4 --retry-all-errors --proto '=https' --tlsv1.2 \
 version=${iso_name#debian-}
 version=${version%-amd64-netinst.iso}
 [[ "$version" == "$expected_major".* ]] || {
-  echo "Refusing unreviewed Debian major: expected $expected_major.x, got $version" >&2
+  echo "unreviewed Debian major: expected $expected_major.x, got $version" >&2
   exit 1
 }
 

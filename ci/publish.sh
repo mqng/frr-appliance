@@ -4,7 +4,7 @@ variant=${1:?}
 name="frr-appliance-${variant}-amd64"
 
 if [[ -z "${CI_API_V4_URL:-}" || -z "${CI_PROJECT_ID:-}" || -z "${CI_JOB_TOKEN:-}" ]]; then
-  echo "Not running in GitLab CI; artifacts left in ./out"
+  echo 'no GitLab package registry available, artifacts left in ./out'
   exit 0
 fi
 

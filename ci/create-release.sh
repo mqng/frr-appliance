@@ -33,12 +33,11 @@ done
 payload=$(jq -n \
   --arg tag "$tag" --arg ref "$CI_COMMIT_SHA" \
   --arg name "FRR Appliance $version" \
-  --arg desc "Automated FRR appliance build from pipeline $CI_PIPELINE_URL. Verify SHA256SUMS and Sigstore bundles before deployment." \
+  --arg desc "FRR appliance build from $CI_PIPELINE_URL. Verify SHA256SUMS and the Sigstore bundles before use." \
   --argjson links "$links" \
   '{tag_name:$tag,ref:$ref,name:$name,description:$desc,assets:{links:$links}}')
 
-# A retried release job can encounter the release created by its first run.
-# Recreate it so asset links exactly match the current package publication.
+# recreate on retry
 status=$(curl --silent --output /dev/null --write-out '%{http_code}' \
   --header "JOB-TOKEN: ${CI_JOB_TOKEN}" "$api/$tag")
 case "$status" in
@@ -47,7 +46,7 @@ case "$status" in
       --header "JOB-TOKEN: ${CI_JOB_TOKEN}" "$api/$tag" >/dev/null
     ;;
   404) ;;
-  *) echo "Unexpected GitLab release lookup status: $status" >&2; exit 1 ;;
+  *) echo "unexpected release lookup status: $status" >&2; exit 1 ;;
 esac
 
 curl --fail-with-body --request POST \

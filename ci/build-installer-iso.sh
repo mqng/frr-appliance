@@ -16,10 +16,7 @@ mkdir -p "$workdir"
 gzip -1 -c "$raw_img" > "$workdir/appliance.img.gz"
 sha256sum "$workdir/appliance.img.gz" | sed 's#  .*/#  #' > "$workdir/SHA256SUMS"
 
-# Build a separate installer initramfs through initramfs-tools itself. Do not
-# append cpio data to the appliance initramfs: initramfs-tools generates ORDER
-# files for each boot-script stage, and bypassing mkinitramfs can leave those
-# directories structurally invalid.
+# mkinitramfs, not appended cpio, keeps the ORDER files valid
 mnt=$(mktemp -d)
 loopdev=""
 cleanup() {
@@ -41,13 +38,12 @@ base=$(basename "$loopdev")
 mount -o ro "/dev/${base}p3" "$mnt"
 
 kernel=$(find "$mnt/boot" -maxdepth 1 -type f -name 'vmlinuz-*' -printf '%f\n' | sort -V | tail -1)
-[[ -n "$kernel" ]] || { echo 'No appliance kernel found' >&2; exit 1; }
+[[ -n "$kernel" ]] || { echo 'no appliance kernel found' >&2; exit 1; }
 version=${kernel#vmlinuz-}
-[[ -d "$mnt/lib/modules/$version" ]] || { echo "No modules for appliance kernel: $version" >&2; exit 1; }
+[[ -d "$mnt/lib/modules/$version" ]] || { echo "no modules for kernel $version" >&2; exit 1; }
 cp "$mnt/boot/$kernel" "$workdir/vmlinuz"
 
-# Keep the appliance filesystem read-only. Writable build state lives only on
-# tmpfs and temporary virtual filesystems mounted into the chroot.
+# appliance fs stays read-only, build state on tmpfs
 mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs "$mnt/tmp"
 mount --rbind /dev "$mnt/dev"
 mount --make-rslave "$mnt/dev"
@@ -90,9 +86,7 @@ for word in $($BB cat /proc/cmdline); do
   esac
 done
 
-# Interactive I/O can only bind to one console, but both boot entries register
-# every console with the kernel, so mirroring status through /dev/kmsg reaches an
-# operator who is watching a different one.
+# also to kmsg, for whoever is on the other console
 kmsg() {
   [ -w /dev/kmsg ] || return 0
   echo "<4>frr-installer: $*" > /dev/kmsg 2>/dev/null || true
@@ -106,42 +100,37 @@ halt_forever() {
   while : ; do $BB sleep 3600; done
 }
 
-# /dev/console follows the kernel console= setting and works for VGA and serial.
 i=0
 while [ "$i" -lt 50 ]; do
   [ -c /dev/console ] && break
   $BB sleep 1
   i=$((i + 1))
 done
-[ -c /dev/console ] || halt_forever 'No /dev/console; cannot run the installer.'
+[ -c /dev/console ] || halt_forever 'no /dev/console'
 exec </dev/console >/dev/console 2>&1
 
-# This runs from initramfs init, and an installer boot carries no root=, so
-# returning to init leaves the kernel with nothing to mount and it panics with
-# "Attempted to kill init". Every failure path must therefore stay in here, and
-# the rescue shell must never be the last thing standing: its stdin is at EOF
-# whenever the selected console has nothing attached to it.
+# no root= on this boot, so never return to init. The rescue shell gets EOF
+# when nothing is on the console, so it cannot be the last thing running
 fail_shell() {
-  notify "ERROR: $*"
-  notify 'The installer cannot continue on this console.'
+  notify "error: $*"
   attempt=0
   while [ "$attempt" -lt 3 ]; do
     attempt=$((attempt + 1))
-    echo "Starting a rescue shell (attempt $attempt of 3); 'exit' restarts it."
+    echo "Rescue shell, attempt $attempt of 3. Exiting restarts it."
     if command -v setsid >/dev/null 2>&1; then
       setsid sh -i </dev/console >/dev/console 2>&1 || true
     else
       sh -i </dev/console >/dev/console 2>&1 || true
     fi
   done
-  halt_forever 'No usable console input. Halting; power-cycle to retry.'
+  halt_forever 'no usable console input, halting'
 }
-trap 'fail_shell "the installer exited unexpectedly"' EXIT
+trap 'fail_shell "installer exited unexpectedly"' EXIT
 
 echo
-echo "FRR Appliance installer"
-echo "======================="
-echo "This writes the complete appliance image and DESTROYS the selected disk."
+echo "FRR appliance installer"
+echo
+echo "This writes the appliance image and DESTROYS the selected disk."
 echo
 kmsg 'installer started'
 
@@ -168,12 +157,12 @@ while [ "$i" -lt 60 ]; do
   $BB sleep 1
   i=$((i + 1))
 done
-[ -n "$media" ] || fail_shell 'Installer media not found'
+[ -n "$media" ] || fail_shell 'installer media not found'
 
 cd /cdrom/appliance
-$BB sha256sum -c SHA256SUMS || fail_shell 'Appliance image checksum verification failed'
+$BB sha256sum -c SHA256SUMS || fail_shell 'image checksum verification failed'
 
-# If the ISO was written to USB, never offer that same disk as an erase target.
+# skip the disk we booted from
 installer_disk=""
 case "$media" in
   /dev/nvme*n*p[0-9]*|/dev/mmcblk*p[0-9]*) installer_disk=${media%p[0-9]*} ;;
@@ -191,13 +180,12 @@ for sysdev in /sys/block/vd* /sys/block/sd* /sys/block/nvme*n* /sys/block/mmcblk
   disks="$disks $d"
 done
 set -- $disks
-[ "$#" -gt 0 ] || fail_shell 'No installable disks found'
+[ "$#" -gt 0 ] || fail_shell 'no installable disks found'
 
 target=$cmd_target
 if [ -z "$target" ] && [ "$#" -eq 1 ]; then
   target=$1
 fi
-# Re-prompt on a mistyped selection rather than treating it as a fatal error.
 while [ -z "$target" ]; do
   echo "Available disks:"
   i=1
@@ -206,7 +194,7 @@ while [ -z "$target" ]; do
     i=$((i + 1))
   done
   printf 'Select target number: '
-  IFS= read -r choice || fail_shell 'Console input unavailable'
+  IFS= read -r choice || fail_shell 'console input unavailable'
   i=1
   for d in "$@"; do
     if [ "$i" = "$choice" ]; then target=$d; fi
@@ -219,29 +207,28 @@ valid=0
 for d in "$@"; do
   if [ "$target" = "$d" ]; then valid=1; fi
 done
-[ "$valid" -eq 1 ] && [ -b "$target" ] || fail_shell "Invalid or unsafe target: $target"
+[ "$valid" -eq 1 ] && [ -b "$target" ] || fail_shell "invalid target: $target"
 
 notify "Target: $target"
 notify 'FRR_APPLIANCE_INSTALLER=READY'
 
 if [ "$autoinstall" -ne 1 ]; then
   printf 'Type ERASE to continue: '
-  IFS= read -r confirm || fail_shell 'Console input unavailable'
-  [ "$confirm" = ERASE ] || fail_shell 'Installation cancelled'
+  IFS= read -r confirm || fail_shell 'console input unavailable'
+  [ "$confirm" = ERASE ] || fail_shell 'cancelled'
 fi
 
-notify "Writing appliance image to $target ..."
+notify "Writing image to $target"
 $BB gzip -dc appliance.img.gz | $BB dd of="$target" bs=4M
 $BB sync
-notify 'Install complete. Rebooting.'
+notify 'Done, rebooting'
 trap - EXIT
 $BB reboot -f
-halt_forever 'Reboot failed; power-cycle the machine.'
+halt_forever 'reboot failed, power-cycle the machine'
 INSTALLER
 chmod 0755 "$conf/scripts/init-premount/appliance-installer"
 
-# Ensure the installer can see both optical/USB media and common target disks
-# regardless of which subset the normal appliance needs for its root filesystem.
+# more than the appliance itself boots from
 cat >> "$conf/modules" <<'MODULES'
 sr_mod
 isofs
@@ -260,20 +247,18 @@ chroot "$mnt" /usr/bin/env \
     -o /tmp/installer-initrd \
     "$version"
 
-# Validate the generated initramfs structure before publishing the ISO.
 listing="$workdir/installer-initrd.list"
 chroot "$mnt" lsinitramfs /tmp/installer-initrd > "$listing"
 grep -Eq '(^|/)scripts/init-premount/ORDER$' "$listing" || {
-  echo 'Generated installer initramfs is missing init-premount/ORDER' >&2
+  echo 'installer initramfs is missing init-premount/ORDER' >&2
   exit 1
 }
 grep -Eq '(^|/)scripts/init-premount/appliance-installer$' "$listing" || {
-  echo 'Generated installer initramfs is missing appliance-installer' >&2
+  echo 'installer initramfs is missing appliance-installer' >&2
   exit 1
 }
 cp "$mnt/tmp/installer-initrd" "$workdir/installer-initrd.gz"
 
-# Release all chroot mounts before xorriso starts reading the finished payload.
 umount "$mnt/run"
 umount -R "$mnt/sys"
 umount "$mnt/proc"
@@ -283,18 +268,13 @@ umount "$mnt"
 losetup -d "$loopdev"
 loopdev=""
 
-# Preserve Debian's proven hybrid BIOS/UEFI boot layout, replacing only the menus
-# and adding our kernel, initramfs, and appliance payload.
+# keep Debian's hybrid boot layout, replace only the menus
 xorriso -osirrox on -indev "$base_iso" \
   -extract /isolinux/txt.cfg "$workdir/txt.cfg.orig" \
   -extract /boot/grub/grub.cfg "$workdir/grub.cfg.orig" >/dev/null 2>&1
 
-# Both entries register both consoles with the kernel so that kernel output and
-# the installer's /dev/kmsg status lines are always visible on either one. Only
-# the order differs, and the last console= is the one /dev/console binds to, so
-# that is what selects where the installer reads its answers from. VGA is the
-# default because a serial-only operator can see and pick from these menus,
-# whereas someone on VGA cannot see a menu that is being driven over serial.
+# both consoles registered either way, last console= is where input comes from.
+# VGA default: a serial operator still sees this menu, the reverse is not true
 cat > "$workdir/txt.cfg" <<'TXT'
 default appliance-vga
 label appliance-vga
@@ -308,12 +288,11 @@ label appliance-serial
 TXT
 cat "$workdir/txt.cfg.orig" >> "$workdir/txt.cfg"
 
-# Plain text prompt on purpose: it renders over serial, and unlike ui menu.c32 it
-# cannot depend on a syslinux module that may not be present on the base ISO.
+# text prompt works over serial, no menu.c32 needed
 cat > "$workdir/isolinux.cfg" <<'ISOLINUX'
 serial 0 115200
 say
-say FRR Appliance installer -- every option ERASES the selected disk
+say FRR appliance installer. Every option ERASES the selected disk.
 say   [Enter]          install, interactive on the VGA console
 say   appliance-serial install, interactive on serial (115200 8N1)
 say   install          Debian installer

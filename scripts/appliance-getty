@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+# autologin until firstboot sets a password
+autologin=()
+[[ -e /var/lib/appliance/firstboot.done ]] || autologin=(--autologin admin)
+
+exec /sbin/agetty "${autologin[@]}" "$@"

@@ -10,23 +10,15 @@ outdir="$PWD/out"
 rootfs="$workdir/rootfs.tar"
 mkdir -p "$workdir" "$outdir"
 
-# GitLab.com saas-linux hosted runners are privileged. Use mmdebstrap's
-# native root mode so package maintainer scripts run in a real chroot rather
-# than through fakechroot/LD_PRELOAD emulation.
-#
-# cracklib-runtime is only a recommendation of libcrack2 and mmdebstrap installs
-# without recommends. Without it the cracklib dictionary is never generated,
-# every libpam-pwquality check fails, and first boot cannot set the admin
-# password. zstd is the compressor initramfs-tools is configured to use; without
-# it every initramfs silently falls back to gzip.
+# cracklib-runtime and zstd are recommends, which mmdebstrap skips
 packages=(
   systemd-sysv linux-image-amd64 initramfs-tools busybox
   grub2-common grub-pc-bin grub-efi-amd64-bin grub-efi-amd64-signed shim-signed dosfstools
-  openssh-server sudo ca-certificates curl gnupg
+  openssh-server sudo ca-certificates curl gnupg dbus
   iproute2 ethtool pciutils kmod tcpdump lsof jq less vim-tiny bash-completion
   iputils-ping traceroute dnsutils mtr-tiny debian-security-support
   nftables chrony auditd apparmor apparmor-utils unattended-upgrades
-  libpam-pwquality cracklib-runtime cloud-guest-utils zstd
+  libpam-pwquality cracklib-runtime cloud-guest-utils zstd snmpd
 )
 
 include=$(IFS=,; echo "${packages[*]}")
@@ -34,12 +26,11 @@ export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git show -s --format=%ct HEAD 2>
 export TMPDIR="$workdir/tmp"
 mkdir -p "$TMPDIR"
 
-# Fail immediately if the runner cannot perform the mounts required by
-# mmdebstrap root mode. GitLab.com saas-linux runners are expected to pass.
+# root mode needs mount, so fail before downloading
 probe=$(mktemp -d)
 if ! mount -t tmpfs -o size=1m tmpfs "$probe"; then
   rmdir "$probe"
-  echo 'Runner lacks CAP_SYS_ADMIN; this pipeline requires a privileged GitLab hosted runner' >&2
+  echo 'runner lacks CAP_SYS_ADMIN; this build needs a privileged runner' >&2
   exit 1
 fi
 umount "$probe"
@@ -52,6 +43,10 @@ mmdebstrap \
   --architectures=amd64 \
   --components=main \
   --aptopt='Acquire::Languages "none"' \
+  --dpkgopt='path-exclude=/usr/share/doc/*' \
+  --dpkgopt='path-include=/usr/share/doc/*/copyright' \
+  --dpkgopt='path-exclude=/usr/share/locale/*' \
+  --dpkgopt='path-include=/usr/share/locale/en*' \
   --include="$include" \
   --customize-hook="copy-in scripts config /tmp" \
   --customize-hook="chroot \"\$1\" /usr/bin/env DEBIAN_FRONTEND=noninteractive APPLIANCE_BUILD_EPOCH=$SOURCE_DATE_EPOCH /bin/bash /tmp/scripts/provision-rootfs.sh $variant" \

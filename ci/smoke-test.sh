@@ -8,10 +8,7 @@ iso="$PWD/out/$name-installer.iso"
 workdir="$PWD/work/$variant/smoke"
 mkdir -p "$workdir"
 
-# VPP may need extra time to initialize DPDK/LCP under software emulation. This
-# is an upper bound, not a wait: boot_wait returns as soon as the guest reports
-# PASS or FAIL. It has to outlast appliance-selftest's own deadlines so that a
-# failing run still delivers its diagnostic instead of being killed mid-test.
+# upper bound, not a wait. Longer than the selftest deadlines
 boot_timeout=420
 if [[ "$variant" == vpp ]]; then
   boot_timeout=540
@@ -53,11 +50,10 @@ boot_wait() {
   wait "$pid" 2>/dev/null || true
 
   if [[ $ok -ne 1 ]]; then
-    echo "$label appliance self-test failed" >&2
+    echo "$label self-test failed" >&2
     echo '--- console ---' >&2
     tail -160 "$log" >&2 || true
-    # Last, so the failing check and its diagnostic are the final lines of the
-    # job log rather than being buried above 160 lines of console output.
+    # last, so it ends the log
     [[ -s "$result" ]] && { echo '--- result ---' >&2; cat "$result" >&2; }
     return 1
   fi
@@ -73,11 +69,10 @@ bios=(
 )
 boot_wait bios "${bios[@]}"
 
-# Use Debian's Microsoft-enrolled OVMF variable store so this is a real
-# Secure Boot test, not merely a UEFI boot test.
+# Microsoft-enrolled vars, so this is Secure Boot and not just UEFI
 code=/usr/share/OVMF/OVMF_CODE_4M.ms.fd
 vars=/usr/share/OVMF/OVMF_VARS_4M.ms.fd
-[[ -r "$code" && -r "$vars" ]] || { echo 'Secure-Boot OVMF firmware not found' >&2; exit 1; }
+[[ -r "$code" && -r "$vars" ]] || { echo 'Secure Boot OVMF firmware not found' >&2; exit 1; }
 cp "$vars" "$workdir/OVMF_VARS.fd"
 qemu-img create -q -f qcow2 -F raw -b "$img" "$workdir/uefi-overlay.qcow2"
 uefi=(
@@ -91,7 +86,7 @@ uefi=(
 )
 boot_wait uefi-secureboot "${uefi[@]}"
 
-# The installer only has to reach our destructive-write screen in CI.
+# only needs to reach the prompt
 iso_log="$workdir/installer-iso.log"
 qemu-img create -q -f qcow2 "$workdir/blank.qcow2" 5G
 qemu-system-x86_64 \
@@ -108,4 +103,4 @@ for _ in $(seq 1 180); do
 done
 kill "$pid" 2>/dev/null || true
 wait "$pid" 2>/dev/null || true
-[[ $ok -eq 1 ]] || { echo 'Installer ISO smoke-test failed' >&2; tail -120 "$iso_log" >&2; exit 1; }
+[[ $ok -eq 1 ]] || { echo 'installer ISO did not reach the confirmation prompt' >&2; tail -120 "$iso_log" >&2; exit 1; }

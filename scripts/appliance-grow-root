@@ -5,8 +5,7 @@ src=$(findmnt -n -o SOURCE /)
 [[ "$src" == /dev/* ]] || { touch /var/lib/appliance/root-grown; exit 0; }
 parent=$(lsblk -no PKNAME "$src" 2>/dev/null | head -1 || true)
 kname=$(lsblk -no KNAME "$src" 2>/dev/null | head -1 || true)
-# lsblk's PARTN column only exists from util-linux 2.40, so it is unavailable on
-# bookworm. sysfs carries the same value on every supported release.
+# PARTN needs util-linux 2.40, sysfs works on bookworm
 partnum=""
 [[ -n "$kname" && -r "/sys/class/block/$kname/partition" ]] &&
   partnum=$(< "/sys/class/block/$kname/partition")

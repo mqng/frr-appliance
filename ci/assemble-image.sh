@@ -32,7 +32,7 @@ rm -f "$img"
 truncate -s "$size" "$img"
 loopdev=$(attach_loop "$img" rw yes)
 
-# GPT: BIOS boot area, 512 MiB ESP, remainder ext4 root.
+# GPT: BIOS boot area, 512 MiB ESP, remainder ext4 root
 parted -s "$loopdev" \
   mklabel gpt \
   mkpart BIOS-BOOT 1MiB 3MiB \
@@ -58,22 +58,18 @@ mkdir -p "$mnt/boot/efi"
 mount "$esp" "$mnt/boot/efi"
 tar --numeric-owner --xattrs --xattrs-include='*' --acls -xf "$rootfs" -C "$mnt"
 
-# Persist stable filesystem identities. Builder-side /dev/loopNpM names must
-# never appear in the finished appliance.
+# no loop device names in the image
 cat > "$mnt/etc/fstab" <<FSTAB
 UUID=$root_uuid / ext4 defaults,errors=remount-ro 0 1
 UUID=$esp_uuid /boot/efi vfat umask=0077 0 1
 FSTAB
 
-# Debian's 10_linux falls back to the current Linux device name if the UUID
-# exists but /dev/disk/by-uuid/<uuid> does not. Minimal CI containers commonly
-# lack those udev-created symlinks, so expose the final UUID mapping while
-# update-grub runs.
+# 10_linux needs by-uuid symlinks and there is no udev here
 mkdir -p /dev/disk/by-uuid
 ln -sfn "../../${base}p3" "/dev/disk/by-uuid/$root_uuid"
 ln -sfn "../../${base}p2" "/dev/disk/by-uuid/$esp_uuid"
 
-# Finalize the image in a real chroot with the final block-device layout.
+# chroot with the final disk layout
 mount --rbind /dev "$mnt/dev"
 mount --make-rslave "$mnt/dev"
 mount -t proc proc "$mnt/proc"

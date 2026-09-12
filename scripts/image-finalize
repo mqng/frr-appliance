@@ -5,7 +5,7 @@ variant=${1:?usage: image-finalize <vanilla|vpp> <disk> <root-uuid>}
 disk=${2:?usage: image-finalize <vanilla|vpp> <disk> <root-uuid>}
 root_uuid=${3:?usage: image-finalize <vanilla|vpp> <disk> <root-uuid>}
 case "$variant" in vanilla|vpp) ;; *) exit 2 ;; esac
-[[ -b "$disk" ]] || { echo "Not a block device: $disk" >&2; exit 1; }
+[[ -b "$disk" ]] || { echo "not a block device: $disk" >&2; exit 1; }
 
 ldconfig
 found_kernel=0
@@ -20,11 +20,12 @@ for modules in /lib/modules/*; do
     update-initramfs -c -k "$kernel"
   fi
 done
-[[ $found_kernel -eq 1 ]] || { echo 'No installed kernel modules found' >&2; exit 1; }
+[[ $found_kernel -eq 1 ]] || { echo 'no installed kernel modules found' >&2; exit 1; }
 
 services=(
   ssh nftables chrony auditd apparmor frr
   appliance-identity.service appliance-grow-root.service appliance-selftest.service
+  appliance-update-check.timer tmp.mount
   getty@tty1.service serial-getty@ttyS0.service
 )
 if [[ "$variant" == vpp ]]; then
@@ -32,8 +33,10 @@ if [[ "$variant" == vpp ]]; then
 fi
 systemctl enable "${services[@]}"
 
-# Install BIOS GRUB into the whole disk, then signed UEFI GRUB/shim into both
-# the removable fallback path and Debian's normal EFI path.
+# available, not enabled
+systemctl disable snmpd.service >/dev/null 2>&1 || true
+
+# BIOS to the disk, signed UEFI to both paths
 grub-install --target=i386-pc --recheck "$disk"
 grub-install \
   --target=x86_64-efi \
@@ -51,15 +54,14 @@ grub-install \
   --recheck
 update-grub
 
-# The image is assembled through a temporary loop device. Never publish a GRUB
-# configuration that refers to that builder-only name.
+# no loop device names in the image
 grep -Eq "root=UUID=${root_uuid}([[:space:]]|$)" /boot/grub/grub.cfg || {
-  echo "GRUB did not use the root filesystem UUID: $root_uuid" >&2
+  echo "grub did not use the root filesystem UUID: $root_uuid" >&2
   grep -E '^[[:space:]]*linux[[:space:]]' /boot/grub/grub.cfg >&2 || true
   exit 1
 }
 if grep -Eq 'root=/dev/loop[0-9]+p?[0-9]*' /boot/grub/grub.cfg; then
-  echo 'GRUB contains a builder-only /dev/loop root device' >&2
+  echo 'grub.cfg still refers to a loop device' >&2
   grep -E '^[[:space:]]*linux[[:space:]]' /boot/grub/grub.cfg >&2 || true
   exit 1
 fi

@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+stamp=/var/lib/appliance/updates
+install -d -m 0755 /var/lib/appliance
+: > "$stamp"
+
+pending=$(apt-get --simulate --quiet upgrade 2>/dev/null | grep -c '^Inst ')
+if [[ "$pending" -gt 0 ]]; then
+  security=$(apt-get --simulate --quiet upgrade 2>/dev/null | grep '^Inst ' | grep -c 'Debian-Security')
+  printf '%s update(s) available, %s security. Install with: sudo apt upgrade\n' \
+    "$pending" "$security" >> "$stamp"
+fi
+
+newest=$(linux-version list 2>/dev/null | linux-version sort --reverse 2>/dev/null | head -1)
+if [[ -n "$newest" && "$newest" != "$(uname -r)" ]]; then
+  printf 'Running kernel %s, %s is installed. Reboot to switch.\n' \
+    "$(uname -r)" "$newest" >> "$stamp"
+fi
+
+chmod 0644 "$stamp"

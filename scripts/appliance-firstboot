@@ -8,19 +8,18 @@ flock 9
 [[ ! -e /var/lib/appliance/firstboot.done ]] || exit 0
 
 echo
-echo "FRR Appliance first boot"
-echo "------------------------"
+echo "FRR appliance setup"
+echo
 hostname=""
 while [[ -z "$hostname" ]]; do
   read -r -p "Hostname [router]: " hostname
   hostname=${hostname:-router}
   if [[ ! "$hostname" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$ ]]; then
-    echo "Invalid hostname: use letters, digits, dots and dashes (max 63 characters)." >&2
+    echo "Letters, digits, dots and dashes only, up to 63 characters." >&2
     hostname=""
   fi
 done
 
-# Set hostname without depending on D-Bus/systemd-hostnamed during early login.
 printf '%s\n' "$hostname" > /etc/hostname
 printf '%s' "$hostname" > /proc/sys/kernel/hostname
 cat > /etc/hosts <<HOSTS
@@ -31,7 +30,6 @@ ff02::1 ip6-allnodes
 ff02::2 ip6-allrouters
 HOSTS
 
-# Keep FRR's hostname aligned. Prefer the native CLI if FRR is ready.
 if timeout 5 vtysh -c 'show version' >/dev/null 2>&1; then
   timeout 10 vtysh \
     -c 'configure terminal' \
@@ -52,9 +50,7 @@ else
 fi
 
 echo
-echo "Set the admin password."
-echo "Policy: at least 12 characters, at least 3 of upper/lower/digit/symbol,"
-echo "at most 3 identical characters in a row, and not a dictionary word."
+echo "Admin password: 12 characters or more, 3 of upper/lower/digit/symbol."
 password_set=0
 for _ in $(seq 1 5); do
   if passwd admin; then
@@ -62,23 +58,30 @@ for _ in $(seq 1 5); do
     break
   fi
 done
-# Never loop forever here: if the policy cannot be satisfied at all the console
-# would be unusable, and the operator needs to see why.
 if [[ $password_set -ne 1 ]]; then
   echo >&2
-  echo 'Could not set the admin password, so first boot is not complete.' >&2
-  echo 'Log in again and rerun: sudo appliance-firstboot' >&2
+  echo "Password not set, setup incomplete. Run 'sudo appliance-firstboot' to retry." >&2
   exit 1
 fi
 
+echo
+echo "Security updates can install automatically. If not, you get a notice at"
+echo "login when there are updates waiting."
+auto_upgrade=n
+read -r -p "Install security updates automatically? [y/N]: " auto_upgrade || true
+autoconf=/etc/apt/apt.conf.d/21appliance-auto-upgrades
+if [[ "$auto_upgrade" =~ ^[Yy] ]]; then
+  printf 'APT::Periodic::Unattended-Upgrade "1";\n' > "$autoconf"
+  chmod 0644 "$autoconf"
+else
+  rm -f "$autoconf"
+fi
+
+# stops autologin, see appliance-getty
 install -d -m 0755 /var/lib/appliance
 touch /var/lib/appliance/firstboot.done
 chown root:root /var/lib/appliance/firstboot.done
 chmod 0600 /var/lib/appliance/firstboot.done
 
-# Drop-ins are gone on the next getty start/reboot; no systemd bus is required here.
-rm -f /etc/systemd/system/getty@tty1.service.d/10-appliance-firstboot.conf
-rm -f /etc/systemd/system/serial-getty@ttyS0.service.d/10-appliance-firstboot.conf
-
 echo
-echo "Bootstrap complete. Configure interfaces and routing in FRR, then 'write memory'."
+echo "Setup complete. Configure interfaces and routing in vtysh, then 'write memory'."

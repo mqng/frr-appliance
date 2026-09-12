@@ -1,7 +1,6 @@
 name: appliance
 
-# Mirrors .gitlab-ci.yml. Both pipelines drive the same ci/*.sh scripts, so the
-# only GitHub-specific logic lives in this file and ci/create-github-release.sh.
+# Mirrors .gitlab-ci.yml; both drive the same ci/*.sh scripts
 
 on:
   push:
@@ -18,12 +17,12 @@ on:
         default: both
         options: [both, vanilla, vpp]
       qemu_accel:
-        description: QEMU accelerator for the smoke tests
+        description: QEMU accelerator for the boot tests
         type: choice
         default: tcg
         options: [tcg, kvm]
       publish_release:
-        description: Attach the output to a GitHub release
+        description: Attach the output to a release
         type: boolean
         default: true
 
@@ -33,14 +32,11 @@ permissions:
 env:
   DEBIAN_FRONTEND: noninteractive
   DISK_SIZE: "4G"
-  # GitHub caps release assets at 2 GiB and the raw image is 4 GiB, so it is
-  # built into ./out but neither signed nor published. The compressed image,
-  # the qcow2 and the installer ISO all fit.
+  # Release assets are capped at 2 GiB and the raw image is 4 GiB
   PUBLISH_RAW_IMG: "false"
 
 jobs:
-  # A full build costs hours of runner time, so gate it on the cheap checks that
-  # ci/pipeline.sh would otherwise reach only after resolving a base image.
+  # A build costs hours, so gate it on the checks that cost seconds
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -61,16 +57,13 @@ jobs:
       fail-fast: false
       matrix:
         variant: ${{ fromJSON(github.event.inputs.variants == 'vanilla' && '["vanilla"]' || github.event.inputs.variants == 'vpp' && '["vpp"]' || '["vanilla","vpp"]') }}
-    # Equivalent of GitLab's resource_group: one build per variant at a time.
     concurrency:
       group: frr-appliance-${{ matrix.variant }}
       cancel-in-progress: false
     env:
       APPLIANCE_VARIANT: ${{ matrix.variant }}
       QEMU_ACCEL: ${{ github.event.inputs.qemu_accel || 'tcg' }}
-      # ci/finalize-artifacts.sh records these in the build manifest and the
-      # SLSA provenance. They fall back to "local" when unset, which would make
-      # the provenance of a CI build useless.
+      # finalize-artifacts.sh puts these in the build manifest and provenance
       CI_COMMIT_SHA: ${{ github.sha }}
       CI_PROJECT_URL: ${{ github.server_url }}/${{ github.repository }}
       CI_PIPELINE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -80,8 +73,6 @@ jobs:
 
       - name: Free runner disk space
         run: |
-          # A build needs roughly 10 GB for the rootfs tarball, the 4 GiB image,
-          # its compressed forms, the Debian netinst ISO and the installer ISO.
           sudo rm -rf \
             /usr/share/dotnet \
             /usr/local/lib/android \
@@ -90,34 +81,27 @@ jobs:
           sudo docker image prune --all --force >/dev/null
           df -h /
 
-      - name: Build, verify, smoke-test and sign
+      - name: Build, verify, boot-test and sign
         run: |
           set -euo pipefail
 
-          # Build each variant on the Debian release it targets, matching the
-          # suites pinned in ci/resolve-base.sh and the images in .gitlab-ci.yml.
+          # Each variant builds on the Debian release it targets
           case "$APPLIANCE_VARIANT" in
             vanilla) builder=debian:13-slim ;;
             vpp)     builder=debian:12-slim ;;
             *) echo "unknown variant: $APPLIANCE_VARIANT" >&2; exit 2 ;;
           esac
 
-          # ci/build.sh derives this from git, which the slim builder lacks.
+          # build.sh takes this from git, which the slim builder lacks
           SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
           export SOURCE_DATE_EPOCH
 
-          # QEMU_ACCEL=kvm only helps if the runner actually exposes /dev/kvm.
           accel=()
           if [[ -e /dev/kvm ]]; then accel=(--device /dev/kvm); fi
 
-          # ACTIONS_ID_TOKEN_REQUEST_* is forwarded rather than a minted token:
-          # an Actions OIDC token is only valid for about five minutes, and
-          # ci/sign-artifacts.sh runs at the very end of the pipeline. cosign
-          # requests its own token from that endpoint when it signs.
-          #
-          # --privileged is required, exactly as on GitLab's privileged Docker
-          # executor: the image is assembled on loop devices and finalised in a
-          # real chroot (ci/lib/loop-image.sh, ci/assemble-image.sh).
+          # Forwarding ACTIONS_ID_TOKEN_REQUEST_* rather than a token lets cosign
+          # mint its own when it signs, hours after this step starts. --privileged
+          # is needed for the loop devices and chroot the build uses
           docker run --rm --privileged "${accel[@]}" \
             --volume "$GITHUB_WORKSPACE:/build" \
             --workdir /build \
@@ -140,8 +124,6 @@ jobs:
         if: always()
         run: sudo chown -R "$(id -u):$(id -g)" "$GITHUB_WORKSPACE"
 
-      # Same set GitLab keeps as job artifacts: metadata and smoke-test logs,
-      # available even when the build fails.
       - name: Upload build metadata
         if: always()
         uses: actions/upload-artifact@v4
@@ -159,8 +141,7 @@ jobs:
             work/*/smoke/*.selftest
             work/base/*SUMS*
 
-      # Handoff to the release job. Everything here is already compressed, so
-      # skip the artifact zip step.
+      # Already compressed, so skip the artifact zip
       - name: Upload release payload
         uses: actions/upload-artifact@v4
         with:
@@ -187,7 +168,7 @@ jobs:
           pattern: release-payload-*
           merge-multiple: true
           path: out
-      - name: Create GitHub release
+      - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash ci/create-github-release.sh

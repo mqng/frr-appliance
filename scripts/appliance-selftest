@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-variant=${1:?}
+# shellcheck source=/dev/null
+. /etc/appliance/build.env
+variant=${APPLIANCE_VARIANT:?}
 port=/dev/virtio-ports/org.frr.appliance.selftest
 
-# The port exists only in CI. Production boots exit immediately.
+# port only exists in CI
 for _ in $(seq 1 5); do
   [[ -w "$port" ]] && break
   modprobe virtio_console >/dev/null 2>&1 || true
@@ -16,18 +18,12 @@ exec 3>"$port"
 emit() { printf '%s\n' "$*" >&3; }
 fail() { emit "APPLIANCE_SELFTEST=FAIL variant=$variant check=$1"; exit 1; }
 
-# Report why the last attempt failed. Without this a CI failure only names the
-# check, which is not enough to tell a broken appliance from a slow one.
 detail() {
   local check=$1 text=${2//$'\n'/ | }
   emit "APPLIANCE_SELFTEST_DETAIL variant=$variant check=$check: ${text:0:600}"
 }
 
-# systemd reports frr active as soon as watchfrr notifies, but this appliance
-# enables about twenty FRR daemons and vtysh has to reach every one of them. On
-# an emulated CPU that VPP is also busy-polling, that is not instantaneous, so
-# give each check a wall-clock budget rather than a single attempt. This is the
-# same "poll with a hard deadline" approach already used for the service checks.
+# vtysh needs all ~20 daemons up, so retry and keep the last error
 await() {
   local check=$1 budget=$2
   shift 2
@@ -61,9 +57,7 @@ await_active() {
 
 emit "APPLIANCE_BOOT=READY variant=$variant"
 
-# Do not block systemd on FRR ordering; poll it with a hard deadline instead.
 await_active frr-service frr 150
-
 await frr-vtysh 45 vtysh -c 'show version'
 await frr-interface 30 vtysh -c 'show interface'
 await sshd 10 sshd -t

@@ -1,0 +1,11 @@
+[Unit]
+Description=Grow appliance root filesystem
+After=local-fs.target
+ConditionPathExists=!/var/lib/appliance/root-grown
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/appliance-grow-root
+
+[Install]
+WantedBy=multi-user.target

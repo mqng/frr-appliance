@@ -69,21 +69,20 @@ for entry in "${entries[@]}"; do
   selected=$((selected+1))
 done
 
-# VPP worker threads busy-poll their assigned cores. When no interface could be
-# bound to vfio-pci there is nothing to poll, so configuring workers would pin
-# every core at 100% for no reason. That happens on any host without IOMMU, which
-# is a supported fallback here, and it starves the rest of the appliance.
+# workers busy-poll, so skip them with nothing bound
 workers=""
 if (( selected > 0 )); then
   cpus=$(nproc)
   if (( cpus > 1 )); then workers="1-$((cpus-1))"; fi
 fi
 
-cat > /run/appliance/vpp-startup.conf <<EOF2
+cat > /run/appliance/vpp-startup.conf <<CONF
 unix {
   nodaemon
   log /var/log/vpp/vpp.log
   cli-listen /run/vpp/cli.sock
+  # group access for vppctl
+  gid netadmin
 }
 api-trace {
   on
@@ -92,19 +91,19 @@ api-trace {
 statseg {
   socket-name /run/vpp/stats.sock
 }
-EOF2
+CONF
 
 if [[ -n "$workers" ]]; then
-cat >> /run/appliance/vpp-startup.conf <<EOF2
+cat >> /run/appliance/vpp-startup.conf <<CONF
 cpu {
   main-core 0
   corelist-workers $workers
 }
-EOF2
+CONF
 fi
 
 if (( selected > 0 )); then
-  cat >> /run/appliance/vpp-startup.conf <<'EOF2'
+  cat >> /run/appliance/vpp-startup.conf <<'CONF'
 plugins {
   plugin linux_cp_plugin.so { enable }
   plugin linux_nl_plugin.so { enable }
@@ -112,19 +111,19 @@ plugins {
 }
 dpdk {
   uio-driver vfio-pci
-EOF2
+CONF
   while IFS=$'\t' read -r iface pci; do
     printf '  dev %s { name %s }\n' "$pci" "$iface" >> /run/appliance/vpp-startup.conf
   done < "$map"
   echo '}' >> /run/appliance/vpp-startup.conf
 else
-  cat >> /run/appliance/vpp-startup.conf <<'EOF2'
+  cat >> /run/appliance/vpp-startup.conf <<'CONF'
 plugins {
   plugin linux_cp_plugin.so { enable }
   plugin linux_nl_plugin.so { enable }
   plugin dpdk_plugin.so { disable }
 }
-EOF2
+CONF
 fi
 
 logger -t vpp-dpdk-prepare "prepared $selected DPDK interface(s)"
