@@ -8,48 +8,54 @@ iso="$PWD/out/$name-installer.iso"
 workdir="$PWD/work/$variant/smoke"
 mkdir -p "$workdir"
 
-# GitLab SaaS runners normally use TCG rather than KVM.
-# VPP images can take considerably longer to boot under software emulation.
-boot_timeout=600
-if [[ "$variant" == "vpp" ]]; then
-  boot_timeout=900
-fi
+# GitLab SaaS normally runs QEMU with TCG. The self-test result is transported
+# over a dedicated virtio serial port so success does not depend on the guest's
+# human console remaining visible after GRUB hands off to Linux.
+boot_timeout=300
+[[ "$variant" == "vpp" ]] && boot_timeout=600
 
 boot_wait() {
   local label=$1
   shift
 
   local log="$workdir/$label.log"
+  local result="$workdir/$label.selftest"
   local pid
   local ok=0
 
   : > "$log"
+  : > "$result"
 
-  qemu-system-x86_64 "$@" >"$log" 2>&1 &
+  qemu-system-x86_64 \
+    "$@" \
+    -device virtio-serial-pci \
+    -chardev "file,id=appliance_selftest,path=$result" \
+    -device virtserialport,chardev=appliance_selftest,name=org.frr.appliance.selftest \
+    >"$log" 2>&1 &
   pid=$!
 
-  for second in $(seq 1 "$boot_timeout"); do
+  for _ in $(seq 1 "$boot_timeout"); do
+    # Primary result channel: independent from ttyS0/GRUB console behavior.
+    if grep -q 'APPLIANCE_SELFTEST=PASS' "$result" 2>/dev/null; then
+      ok=1
+      break
+    fi
+    if grep -q 'APPLIANCE_SELFTEST=FAIL' "$result" 2>/dev/null; then
+      break
+    fi
+
+    # Keep console markers as a fallback and for useful diagnostics.
     if grep -q 'APPLIANCE_SELFTEST=PASS' "$log"; then
       ok=1
       break
     fi
-
     if grep -q 'APPLIANCE_SELFTEST=FAIL' "$log"; then
       break
     fi
-
-    if ! kill -0 "$pid" 2>/dev/null; then
-      break
-    fi
-
-    # Once GRUB hands off to Linux, serial kernel output should appear quickly.
-    # Fail early instead of burning the full CI timeout on a kernel/console hang.
-    if [[ $second -eq 120 ]] && ! grep -Eq 'Linux version|APPLIANCE_SELFTEST=START' "$log"; then
-      echo "$label kernel handoff produced no serial output after 120 seconds" >&2
-      break
-    fi
-
     if grep -Eq 'Kernel panic|Entering emergency mode|You are in emergency mode' "$log"; then
+      break
+    fi
+    if ! kill -0 "$pid" 2>/dev/null; then
       break
     fi
 
@@ -61,19 +67,18 @@ boot_wait() {
 
   if [[ $ok -ne 1 ]]; then
     echo "$label boot self-test failed" >&2
+    if [[ -s "$result" ]]; then
+      echo "--- appliance self-test channel ---" >&2
+      cat "$result" >&2 || true
+    fi
+    echo "--- serial console ---" >&2
     tail -200 "$log" >&2 || true
     return 1
   fi
 }
 
 # BIOS boot test.
-qemu-img create \
-  -q \
-  -f qcow2 \
-  -F raw \
-  -b "$img" \
-  "$workdir/bios-overlay.qcow2"
-
+qemu-img create -q -f qcow2 -F raw -b "$img" "$workdir/bios-overlay.qcow2"
 common=(
   -machine "q35,accel=${QEMU_ACCEL:-tcg}"
   -m 2048
@@ -81,50 +86,29 @@ common=(
   -drive "file=$workdir/bios-overlay.qcow2,format=qcow2,if=virtio"
   -netdev user,id=n0
   -device virtio-net-pci,netdev=n0
-  -nographic
+  -display none
+  -serial stdio
+  -monitor none
   -no-reboot
 )
-
 if [[ ${QEMU_ACCEL:-tcg} == "tcg" ]]; then
   common+=( -cpu Nehalem )
 fi
-
 boot_wait bios "${common[@]}"
 
 # UEFI boot test.
 code=""
 vars=""
-
-for f in \
-  /usr/share/OVMF/OVMF_CODE.fd \
-  /usr/share/OVMF/OVMF_CODE_4M.fd
-do
-  if [[ -r "$f" ]]; then
-    code=$f
-    break
-  fi
+for f in /usr/share/OVMF/OVMF_CODE.fd /usr/share/OVMF/OVMF_CODE_4M.fd; do
+  [[ -r "$f" ]] && { code=$f; break; }
 done
-
-for f in \
-  /usr/share/OVMF/OVMF_VARS.fd \
-  /usr/share/OVMF/OVMF_VARS_4M.fd
-do
-  if [[ -r "$f" ]]; then
-    vars=$f
-    break
-  fi
+for f in /usr/share/OVMF/OVMF_VARS.fd /usr/share/OVMF/OVMF_VARS_4M.fd; do
+  [[ -r "$f" ]] && { vars=$f; break; }
 done
 
 if [[ -n "$code" && -n "$vars" ]]; then
   cp "$vars" "$workdir/OVMF_VARS.fd"
-
-  qemu-img create \
-    -q \
-    -f qcow2 \
-    -F raw \
-    -b "$img" \
-    "$workdir/uefi-overlay.qcow2"
-
+  qemu-img create -q -f qcow2 -F raw -b "$img" "$workdir/uefi-overlay.qcow2"
   uefi=(
     -machine "q35,accel=${QEMU_ACCEL:-tcg}"
     -m 2048
@@ -134,30 +118,23 @@ if [[ -n "$code" && -n "$vars" ]]; then
     -drive "file=$workdir/uefi-overlay.qcow2,format=qcow2,if=virtio"
     -netdev user,id=n0
     -device virtio-net-pci,netdev=n0
-    -nographic
+    -display none
+    -serial stdio
+    -monitor none
     -no-reboot
   )
-
   if [[ ${QEMU_ACCEL:-tcg} == "tcg" ]]; then
     uefi+=( -cpu Nehalem )
   fi
-
   boot_wait uefi "${uefi[@]}"
 else
   echo "OVMF not found; refusing to publish without UEFI smoke test" >&2
   exit 1
 fi
 
-# Verify that the generated installer ISO boots far enough to show
-# the appliance installer rather than only validating the ISO structure.
+# Installer ISO test: verify that the remastered ISO reaches our installer.
 iso_log="$workdir/installer-iso.log"
-
-qemu-img create \
-  -q \
-  -f qcow2 \
-  "$workdir/blank.qcow2" \
-  5G
-
+qemu-img create -q -f qcow2 "$workdir/blank.qcow2" 5G
 iso_args=(
   -machine "q35,accel=${QEMU_ACCEL:-tcg}"
   -m 1536
@@ -165,33 +142,28 @@ iso_args=(
   -drive "file=$workdir/blank.qcow2,format=qcow2,if=virtio"
   -cdrom "$iso"
   -boot d
-  -nographic
+  -display none
+  -serial stdio
+  -monitor none
   -no-reboot
 )
-
 if [[ ${QEMU_ACCEL:-tcg} == "tcg" ]]; then
   iso_args+=( -cpu Nehalem )
 fi
 
 qemu-system-x86_64 "${iso_args[@]}" >"$iso_log" 2>&1 &
 pid=$!
-
 ok=0
-iso_timeout=300
-
-for _ in $(seq 1 "$iso_timeout"); do
+for _ in $(seq 1 300); do
   if grep -q 'FRR Appliance installer' "$iso_log"; then
     ok=1
     break
   fi
-
   if ! kill -0 "$pid" 2>/dev/null; then
     break
   fi
-
   sleep 1
 done
-
 kill "$pid" 2>/dev/null || true
 wait "$pid" 2>/dev/null || true
 

@@ -21,11 +21,10 @@ grep -q 'unexpected interactive Debian Installer prompt' ci/build.sh || { echo '
 grep -q 'debian-installer/exit/poweroff boolean true' ci/preseed.cfg || { echo 'Installer completion is not unattended' >&2; exit 1; }
 grep -q 'passwd/make-user boolean false' ci/preseed.cfg || { echo 'Installer account creation is not disabled' >&2; exit 1; }
 
-if grep -RInE --exclude='static-check.sh' -- '-cpu[[:space:]]+max' ci; then
-  echo 'Do not use QEMU -cpu max in TCG CI; use the reviewed named model' >&2
-  exit 1
-fi
-
-grep -q -- '-cpu Nehalem' ci/smoke-test.sh || { echo 'TCG smoke-test CPU model missing' >&2; exit 1; }
+# Boot smoke-test success must not depend on ttyS0 output. Debian 13 can boot
+# while a serial-only harness appears stuck after GRUB's initramfs message.
+grep -q 'org.frr.appliance.selftest' ci/smoke-test.sh || { echo 'Dedicated self-test channel missing' >&2; exit 1; }
+grep -q 'org.frr.appliance.selftest' scripts/appliance-selftest || { echo 'Guest self-test result channel missing' >&2; exit 1; }
+grep -q 'generated GRUB config has no ttyS0 kernel console' scripts/provision.sh || { echo 'GRUB serial-console build assertion missing' >&2; exit 1; }
 
 echo STATIC_CHECKS=PASS

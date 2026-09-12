@@ -152,6 +152,17 @@ if mountpoint -q /boot/efi; then
   grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=FRRAppliance --uefi-secure-boot --force-extra-removable --no-nvram --recheck
 fi
 update-grub
+
+# Fail during image construction if the installed GRUB entries lost the serial
+# kernel console. This catches the Debian 13 serial-console failure before the
+# expensive smoke-test stage.
+if ! grep -Eq '^[[:space:]]*linux[[:space:]].*console=ttyS0,115200n8' /boot/grub/grub.cfg; then
+  echo 'ERROR: generated GRUB config has no ttyS0 kernel console' >&2
+  grep -E '^[[:space:]]*linux[[:space:]]' /boot/grub/grub.cfg >&2 || true
+  exit 1
+fi
+
+grep -E '^[[:space:]]*linux[[:space:]]' /boot/grub/grub.cfg | head -3 || true
 update-initramfs -u -k all
 
 systemctl enable ssh nftables chrony auditd apparmor frr appliance-identity.service appliance-grow-root.service appliance-selftest.service serial-getty@ttyS0.service

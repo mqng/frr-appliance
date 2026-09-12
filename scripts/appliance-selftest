@@ -2,53 +2,43 @@
 set -uo pipefail
 
 variant=${1:?}
+result_port=/dev/virtio-ports/org.frr.appliance.selftest
+
+emit() {
+  local message=$1
+  printf '%s\n' "$message"
+  if [[ -w "$result_port" ]]; then
+    printf '%s\n' "$message" > "$result_port" 2>/dev/null || true
+  fi
+}
 
 fail() {
-  echo "APPLIANCE_SELFTEST=FAIL variant=$variant check=$1"
+  emit "APPLIANCE_SELFTEST=FAIL variant=$variant check=$1"
   exit 1
 }
 
-echo "APPLIANCE_SELFTEST=START variant=$variant"
+emit "APPLIANCE_SELFTEST=START variant=$variant"
 
-systemctl is-active --quiet frr ||
-  fail frr-service
+systemctl is-active --quiet frr || fail frr-service
+vtysh -c 'show version' >/dev/null 2>&1 || fail frr-vtysh
+vtysh -c 'show interface' >/dev/null 2>&1 || fail frr-interface
+sshd -t || fail sshd
+nft --check --file /etc/nftables.conf || fail nftables
 
-vtysh -c 'show version' >/dev/null 2>&1 ||
-  fail frr-vtysh
-
-vtysh -c 'show interface' >/dev/null 2>&1 ||
-  fail frr-interface
-
-sshd -t ||
-  fail sshd
-
-nft --check --file /etc/nftables.conf ||
-  fail nftables
-
-test -s /boot/efi/EFI/BOOT/BOOTX64.EFI ||
-  fail uefi-bootloader
+test -s /boot/efi/EFI/BOOT/BOOTX64.EFI || fail uefi-bootloader
 
 if [[ "$variant" == "vpp" ]]; then
-  systemctl is-active --quiet vpp ||
-    fail vpp-service
-
-  vppctl show version >/dev/null 2>&1 ||
-    fail vpp-cli
-
-  vppctl show interface >/dev/null 2>&1 ||
-    fail vpp-interface
+  systemctl is-active --quiet vpp || fail vpp-service
+  vppctl show version >/dev/null 2>&1 || fail vpp-cli
+  vppctl show interface >/dev/null 2>&1 || fail vpp-interface
 
   if [[ -s /run/appliance/vpp-ifaces.tsv ]]; then
-    lcp_state=$(vppctl show lcp 2>&1) ||
-      fail vpp-lcp
-
+    lcp_state=$(vppctl show lcp 2>&1) || fail vpp-lcp
     while IFS=$'\t' read -r iface pci; do
       [[ -n "$iface" && -n "$pci" ]] || continue
-
-      grep -Fq "$iface" <<<"$lcp_state" ||
-        fail "vpp-lcp-$iface"
+      grep -Fq "$iface" <<<"$lcp_state" || fail "vpp-lcp-$iface"
     done < /run/appliance/vpp-ifaces.tsv
   fi
 fi
 
-echo "APPLIANCE_SELFTEST=PASS variant=$variant"
+emit "APPLIANCE_SELFTEST=PASS variant=$variant"
