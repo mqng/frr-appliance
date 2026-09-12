@@ -23,11 +23,12 @@ for variant in vanilla vpp; do
   if [[ -r "$build_env" ]]; then
     vpp_version=$(env_value "$build_env" VPP_VERSION)
     [[ "$vpp_version" != none ]] || vpp_version=-
-    rows+=$(printf '| %s | %s (%s) | %s | %s |' \
+    rows+=$(printf '| %s | %s (%s) | %s (%s) | %s |' \
       "$variant" \
       "$(env_value "$build_env" DEBIAN_VERSION)" \
       "$(env_value "$build_env" DEBIAN_CODENAME)" \
       "$(env_value "$build_env" FRR_VERSION)" \
+      "$(env_value "$build_env" FRR_CHANNEL)" \
       "$vpp_version")
     rows+=$'\n'
   fi

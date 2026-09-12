@@ -39,6 +39,10 @@ grep -q 'OVMF_CODE_4M.ms.fd' ci/smoke-test.sh || fail 'Secure Boot test missing'
 # signed package sources
 grep -q 'Signed-By: /usr/share/keyrings/frrouting.gpg' scripts/install-frr.sh || fail 'FRR keyring missing'
 grep -q 'Signed-By: /etc/apt/keyrings/fdio-release.asc' scripts/install-vpp.sh || fail 'VPP keyring missing'
+grep -qE '^key_sha256=[0-9a-f]{64}$' scripts/install-frr.sh || fail 'FRR key is not pinned'
+grep -qE '^key_sha256=[0-9a-f]{64}$' scripts/install-vpp.sh || fail 'VPP key is not pinned'
+# frr-stable follows feature and major releases
+grep -qE '^channel=frr-[0-9]+\.[0-9]+$' scripts/install-frr.sh || fail 'FRR must track a patch line'
 ! grep -RInE --exclude='static-check.sh' 'A90FC36D|4A56C773|3D9968AC|BBC9ACA9|9CD45627' scripts ci >/dev/null || fail 'hard-coded repository signer'
 
 # frr is Before=network.target, so nothing it waits on may be after

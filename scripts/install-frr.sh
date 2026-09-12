@@ -18,11 +18,16 @@ got=$(sha256sum "$key" | awk '{print $1}')
   exit 1
 }
 
+# A patch line, not frr-stable, which would follow feature and major releases.
+# deb.frrouting.org publishes frr-<major> and frr-<major>.<minor> alongside it.
+# Moving this is the deliberate part of an FRR upgrade
+channel=frr-10.4
+
 cat > /etc/apt/sources.list.d/frr.sources <<APT
 Types: deb
 URIs: https://deb.frrouting.org/frr
 Suites: $suite
-Components: frr-stable
+Components: $channel
 Signed-By: /usr/share/keyrings/frrouting.gpg
 APT
 

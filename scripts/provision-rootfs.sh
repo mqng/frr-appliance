@@ -138,6 +138,7 @@ MODULES
 
 build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 frr_version=$(dpkg-query -W -f='${Version}' frr)
+frr_channel=$(awk -F': ' '/^Components:/{print $2}' /etc/apt/sources.list.d/frr.sources)
 vpp_version=none
 frr_keyring_sha256=$(sha256sum /usr/share/keyrings/frrouting.gpg | awk '{print $1}')
 vpp_keyring_sha256=none
@@ -151,6 +152,7 @@ APPLIANCE_BUILD_TIME=$build_time
 DEBIAN_VERSION=$VERSION_ID
 DEBIAN_CODENAME=$suite
 FRR_VERSION=$frr_version
+FRR_CHANNEL=$frr_channel
 VPP_VERSION=$vpp_version
 FRR_KEYRING_SHA256=$frr_keyring_sha256
 VPP_KEYRING_SHA256=$vpp_keyring_sha256

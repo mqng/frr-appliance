@@ -13,6 +13,26 @@ Two variants, amd64 only:
 `vpp` is on Debian 12 because fd.io has no trixie packages. It binds NICs to
 `vfio-pci`, so it needs an IOMMU and physical or passed-through hardware.
 
+## Versions
+
+Nothing crosses a feature release on its own. Debian comes from a frozen suite,
+so builds pick up point releases and security updates only. FRR tracks a patch
+line, `frr-10.4`, set as `channel` in `scripts/install-frr.sh`. VPP comes from
+fd.io's `release` repo, which holds the last tagged release for the suite.
+
+Each release lists the exact versions it was built from, so two runs can be
+compared without downloading anything.
+
+Three things stop a build on purpose:
+
+- A new Debian major, blocked by `expected_major` in `ci/resolve-base.sh`
+- A changed FRR or fd.io signing key, checked against `key_sha256` in the
+  install scripts
+- `COSIGN_VERSION` in `ci/install-build-deps.sh`, pinned with a hash
+
+Moving to a newer FRR means changing `channel` and reading their release notes.
+A patch line stops getting fixes eventually, so it is worth checking yearly.
+
 ## Install
 
 Each build produces, per variant:
