@@ -4,6 +4,9 @@ set -uo pipefail
 variant=${1:?}
 result_port=/dev/virtio-ports/org.frr.appliance.selftest
 
+modprobe virtio_console 2>/dev/null || true
+udevadm settle --timeout=10 2>/dev/null || true
+
 emit() {
   local message=$1
   printf '%s\n' "$message"

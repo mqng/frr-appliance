@@ -16,13 +16,15 @@ boot_timeout=300
 
 boot_wait() {
   local label=$1
-  shift
+  local ssh_port=$2
+  shift 2
 
   local log="$workdir/$label.log"
   local result="$workdir/$label.selftest"
   local qemu_debug="$workdir/$label.qemu-debug.log"
   local pid
   local ready=0
+  local ssh_ready=0
   local ok=0
   local ready_deadline=$((SECONDS + 240))
   local test_deadline=0
@@ -43,12 +45,18 @@ boot_wait() {
 
   while kill -0 "$pid" 2>/dev/null; do
     if grep -q 'APPLIANCE_BOOT=READY' "$result" 2>/dev/null; then
-      if [[ $ready -eq 0 ]]; then
-        ready=1
-        # FRR itself may need up to two minutes to settle; start this
-        # deadline only after Linux userspace is known to be alive.
-        test_deadline=$((SECONDS + 300))
-      fi
+      ready=1
+    fi
+
+    # SSH is an independent userspace signal. This prevents a missing
+    # virtio_console module from being misreported as a kernel boot failure.
+    if timeout 2 bash -c "exec 3<>/dev/tcp/127.0.0.1/$ssh_port; IFS= read -r banner <&3; [[ \$banner == SSH-* ]]" 2>/dev/null; then
+      ssh_ready=1
+      ready=1
+    fi
+
+    if [[ $ready -eq 1 && $test_deadline -eq 0 ]]; then
+      test_deadline=$((SECONDS + 300))
     fi
 
     if grep -q 'APPLIANCE_SELFTEST=PASS' "$result" 2>/dev/null; then
@@ -60,7 +68,7 @@ boot_wait() {
     fi
 
     if [[ $ready -eq 0 && $SECONDS -ge $ready_deadline ]]; then
-      echo "$label did not reach Linux userspace" >&2
+      echo "$label produced neither the boot beacon nor an SSH banner" >&2
       break
     fi
     if [[ $ready -eq 1 && $SECONDS -ge $test_deadline ]]; then
@@ -76,6 +84,7 @@ boot_wait() {
 
   if [[ $ok -ne 1 ]]; then
     echo "$label boot self-test failed" >&2
+    echo "userspace: beacon=$ready ssh=$ssh_ready" >&2
     if [[ -s "$result" ]]; then
       echo "--- appliance result channel ---" >&2
       cat "$result" >&2 || true
@@ -95,7 +104,7 @@ common=(
   -m 2048
   -smp 2
   -drive "file=$workdir/bios-overlay.qcow2,format=qcow2,if=virtio"
-  -netdev user,id=n0
+  -netdev user,id=n0,hostfwd=tcp:127.0.0.1:22022-:22
   -device virtio-net-pci,netdev=n0
   -display none
   -serial stdio
@@ -105,7 +114,7 @@ common=(
 if [[ ${QEMU_ACCEL:-tcg} == "tcg" ]]; then
   common+=( -cpu Nehalem )
 fi
-boot_wait bios "${common[@]}"
+boot_wait bios 22022 "${common[@]}"
 
 # UEFI boot test.
 code=""
@@ -127,7 +136,7 @@ if [[ -n "$code" && -n "$vars" ]]; then
     -drive "if=pflash,format=raw,readonly=on,file=$code"
     -drive "if=pflash,format=raw,file=$workdir/OVMF_VARS.fd"
     -drive "file=$workdir/uefi-overlay.qcow2,format=qcow2,if=virtio"
-    -netdev user,id=n0
+    -netdev user,id=n0,hostfwd=tcp:127.0.0.1:22023-:22
     -device virtio-net-pci,netdev=n0
     -display none
     -serial stdio
@@ -137,7 +146,7 @@ if [[ -n "$code" && -n "$vars" ]]; then
   if [[ ${QEMU_ACCEL:-tcg} == "tcg" ]]; then
     uefi+=( -cpu Nehalem )
   fi
-  boot_wait uefi "${uefi[@]}"
+  boot_wait uefi 22023 "${uefi[@]}"
 else
   echo "OVMF not found; refusing to publish without UEFI smoke test" >&2
   exit 1

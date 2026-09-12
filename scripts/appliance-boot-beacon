@@ -3,7 +3,10 @@ set -euo pipefail
 
 port=/dev/virtio-ports/org.frr.appliance.selftest
 
-# Give udev a short window to create the virtio-serial device.
+# virtio_console is modular on Debian; do not depend on udev autoloading it.
+modprobe virtio_console 2>/dev/null || true
+udevadm settle --timeout=10 2>/dev/null || true
+
 for _ in $(seq 1 30); do
   if [[ -w "$port" ]]; then
     printf 'APPLIANCE_BOOT=READY\n' > "$port"
@@ -12,5 +15,5 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 
-# No virtio test port is normal outside CI.
+# The CI port does not exist on normal appliances.
 exit 0
