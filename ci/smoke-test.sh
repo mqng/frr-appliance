@@ -19,7 +19,7 @@ boot_wait() {
 
   local log="$workdir/$label.log"
   local result="$workdir/$label.selftest"
-  local pid ok=0
+  local pid ok=0 reason='' waited=0
   : > "$log"
   : > "$result"
 
@@ -37,22 +37,31 @@ boot_wait() {
       break
     fi
     if grep -q 'APPLIANCE_SELFTEST=FAIL' "$result"; then
+      reason='the self-test reported FAIL'
       break
     fi
     if ! kill -0 "$pid" 2>/dev/null; then
+      reason='qemu exited before the self-test finished'
       break
     fi
+    waited=$((waited + 1))
     sleep 1
   done
+  [[ $ok -eq 1 || -n "$reason" ]] || reason="no verdict within ${boot_timeout}s"
 
   kill "$pid" 2>/dev/null || true
   wait "$pid" 2>/dev/null || true
 
   if [[ $ok -ne 1 ]]; then
-    echo "$label self-test failed" >&2
-    echo '--- console ---' >&2
+    echo "variant=$variant phase=$label failed after ${waited}s: $reason" >&2
+    echo "--- $variant $label console ---" >&2
     tail -160 "$log" >&2 || true
-    [[ -s "$result" ]] && { echo '--- result ---' >&2; cat "$result" >&2; }
+    echo "--- $variant $label result ---" >&2
+    if [[ -s "$result" ]]; then
+      cat "$result" >&2
+    else
+      echo 'nothing arrived on the self-test channel' >&2
+    fi
     return 1
   fi
 }
