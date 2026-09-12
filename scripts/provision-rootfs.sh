@@ -40,6 +40,16 @@ LABEL=rootfs / ext4 defaults,errors=remount-ro 0 1
 LABEL=EFI /boot/efi vfat umask=0077 0 1
 FSTAB
 
+# Never inherit the CI runner hostname into the appliance.
+printf 'router\n' > /etc/hostname
+cat > /etc/hosts <<'HOSTS'
+127.0.0.1 localhost
+127.0.1.1 router
+::1 localhost ip6-localhost ip6-loopback
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+HOSTS
+
 # FRR owns interface addressing and routing. Linux only brings up loopback.
 cat > /etc/network/interfaces <<'NET'
 auto lo

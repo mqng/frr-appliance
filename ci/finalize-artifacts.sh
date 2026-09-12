@@ -4,6 +4,9 @@ variant=${1:?}
 name="frr-appliance-${variant}-amd64"
 img="$PWD/out/$name.img"
 
+# Base-image metadata is produced by resolve-base.sh and is required for provenance.
+source work/base.env
+
 # shellcheck source=ci/lib/loop-image.sh
 source ci/lib/loop-image.sh
 mnt=$(mktemp -d)

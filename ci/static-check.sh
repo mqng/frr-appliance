@@ -35,4 +35,10 @@ grep -q 'OVMF_CODE_4M.ms.fd' ci/smoke-test.sh || { echo 'Secure-Boot OVMF smoke 
 [[ ! -e ci/preseed.cfg ]] || { echo 'Legacy Debian Installer preseed still present' >&2; exit 1; }
 [[ ! -e scripts/provision.sh ]] || { echo 'Legacy installer provisioning script still present' >&2; exit 1; }
 
+grep -q "printf 'router\\\\n' > /etc/hostname" scripts/provision-rootfs.sh || { echo 'Default appliance hostname is not pinned' >&2; exit 1; }
+! grep -q 'hostnamectl' scripts/appliance-firstboot || { echo 'First boot must not depend on systemd-hostnamed' >&2; exit 1; }
+grep -q 'exec </dev/console >/dev/console 2>&1' ci/build-installer-iso.sh || { echo 'Installer must use /dev/console' >&2; exit 1; }
+! grep -q 'appliance.console=' ci/build-installer-iso.sh || { echo 'Installer has duplicate console routing' >&2; exit 1; }
+grep -q '^source work/base.env$' ci/finalize-artifacts.sh || { echo 'Provenance base metadata is not loaded' >&2; exit 1; }
+
 echo STATIC_CHECKS=PASS

@@ -81,30 +81,32 @@ esac
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
-console=ttyS0
 cmd_target=""
 autoinstall=0
 for word in $($BB cat /proc/cmdline); do
   case "$word" in
-    appliance.console=*) console=${word#appliance.console=} ;;
     appliance.target=*) cmd_target=${word#appliance.target=} ;;
     appliance.autoinstall=1) autoinstall=1 ;;
   esac
 done
-case "$console" in tty1|ttyS0) ;; *) console=ttyS0 ;; esac
-console_dev="/dev/$console"
+
+# /dev/console follows the kernel console= setting and works for VGA and serial.
 i=0
 while [ "$i" -lt 50 ]; do
-  [ -c "$console_dev" ] && break
+  [ -c /dev/console ] && break
   $BB sleep 1
   i=$((i + 1))
 done
-exec <"$console_dev" >"$console_dev" 2>&1
+[ -c /dev/console ] || exit 1
+exec </dev/console >/dev/console 2>&1
 
 fail_shell() {
   echo "ERROR: $*"
   echo "Dropping to an installer shell."
-  exec sh
+  if command -v setsid >/dev/null 2>&1; then
+    exec setsid sh -c 'exec sh -i </dev/console >/dev/console 2>&1'
+  fi
+  exec sh -i </dev/console >/dev/console 2>&1
 }
 
 echo
@@ -173,7 +175,7 @@ if [ -z "$target" ]; then
       i=$((i + 1))
     done
     printf 'Select target number: '
-    read choice
+    IFS= read -r choice || fail_shell 'Console input unavailable'
     i=1
     for d in "$@"; do
       if [ "$i" = "$choice" ]; then target=$d; break; fi
@@ -193,7 +195,7 @@ echo "FRR_APPLIANCE_INSTALLER=READY"
 
 if [ "$autoinstall" -ne 1 ]; then
   printf 'Type ERASE to continue: '
-  read confirm
+  IFS= read -r confirm || fail_shell 'Console input unavailable'
   [ "$confirm" = ERASE ] || fail_shell 'Installation cancelled'
 fi
 
@@ -259,11 +261,11 @@ default appliance-serial
 label appliance-serial
   menu label ^Install FRR Appliance (Serial, ERASE DISK)
   kernel /appliance/vmlinuz
-  append initrd=/appliance/installer-initrd.gz appliance.installer=1 appliance.console=ttyS0 console=tty0 console=ttyS0,115200n8
+  append initrd=/appliance/installer-initrd.gz appliance.installer=1 console=tty0 console=ttyS0,115200n8
 label appliance-vga
   menu label Install FRR Appliance (^VGA, ERASE DISK)
   kernel /appliance/vmlinuz
-  append initrd=/appliance/installer-initrd.gz appliance.installer=1 appliance.console=tty1 console=tty0
+  append initrd=/appliance/installer-initrd.gz appliance.installer=1 console=tty0
 TXT
 cat "$workdir/txt.cfg.orig" >> "$workdir/txt.cfg"
 
@@ -278,11 +280,11 @@ cat > "$workdir/grub.cfg" <<'GRUB'
 set default=0
 set timeout=5
 menuentry 'Install FRR Appliance (Serial, ERASE DISK)' {
-    linux /appliance/vmlinuz appliance.installer=1 appliance.console=ttyS0 console=tty0 console=ttyS0,115200n8
+    linux /appliance/vmlinuz appliance.installer=1 console=tty0 console=ttyS0,115200n8
     initrd /appliance/installer-initrd.gz
 }
 menuentry 'Install FRR Appliance (VGA, ERASE DISK)' {
-    linux /appliance/vmlinuz appliance.installer=1 appliance.console=tty1 console=tty0
+    linux /appliance/vmlinuz appliance.installer=1 console=tty0
     initrd /appliance/installer-initrd.gz
 }
 GRUB

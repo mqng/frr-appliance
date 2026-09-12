@@ -2,6 +2,9 @@
 set -euo pipefail
 
 [[ $(id -u) -eq 0 ]] || { echo "must run as root" >&2; exit 1; }
+install -d -m 0755 /run/appliance
+exec 9>/run/appliance/firstboot.lock
+flock 9
 [[ ! -e /var/lib/appliance/firstboot.done ]] || exit 0
 
 echo
@@ -13,10 +16,31 @@ if [[ ! "$hostname" =~ ^[A-Za-z0-9][A-Za-z0-9.-]{0,62}$ ]]; then
   echo "Invalid hostname" >&2
   exit 1
 fi
-hostnamectl set-hostname "$hostname"
-# Keep the FRR daemon hostname and vtysh prompt aligned with the appliance hostname
-if systemctl is-active --quiet frr; then
-  vtysh -c 'configure terminal' -c "hostname $hostname" -c 'end' -c 'write memory' || true
+
+# Set hostname without depending on D-Bus/systemd-hostnamed during early login.
+printf '%s\n' "$hostname" > /etc/hostname
+printf '%s' "$hostname" > /proc/sys/kernel/hostname
+cat > /etc/hosts <<HOSTS
+127.0.0.1 localhost
+127.0.1.1 $hostname
+::1 localhost ip6-localhost ip6-loopback
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+HOSTS
+
+# Keep FRR's hostname aligned. Prefer the native CLI if FRR is ready.
+if timeout 5 vtysh -c 'show version' >/dev/null 2>&1; then
+  timeout 10 vtysh \
+    -c 'configure terminal' \
+    -c "hostname $hostname" \
+    -c 'end' \
+    -c 'write memory' || true
+else
+  if grep -q '^hostname ' /etc/frr/frr.conf; then
+    sed -i "s/^hostname .*/hostname $hostname/" /etc/frr/frr.conf
+  else
+    sed -i "/^frr defaults/a hostname $hostname" /etc/frr/frr.conf
+  fi
 fi
 if grep -q '^hostname ' /etc/frr/vtysh.conf; then
   sed -i "s/^hostname .*/hostname $hostname/" /etc/frr/vtysh.conf
@@ -34,11 +58,9 @@ touch /var/lib/appliance/firstboot.done
 chown root:root /var/lib/appliance/firstboot.done
 chmod 0600 /var/lib/appliance/firstboot.done
 
-# Remove local-console autologin immediately after credential bootstrap
+# Drop-ins are gone on the next getty start/reboot; no systemd bus is required here.
 rm -f /etc/systemd/system/getty@tty1.service.d/10-appliance-firstboot.conf
 rm -f /etc/systemd/system/serial-getty@ttyS0.service.d/10-appliance-firstboot.conf
-systemctl daemon-reload || true
-systemctl try-restart ssh.service || true
 
 echo
 echo "Bootstrap complete. Configure interfaces and routing in FRR, then 'write memory'."
