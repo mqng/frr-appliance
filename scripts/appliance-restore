@@ -7,9 +7,31 @@ src=${1:-/dev/stdin}
 
 stage=$(mktemp -d)
 saved=$(mktemp -d)
-trap 'rm -rf "$stage" "$saved"' EXIT
+archive=$(mktemp)
+trap 'rm -rf "$stage" "$saved"; rm -f "$archive"' EXIT
 
-tar --extract --gzip --file "$src" --directory "$stage"
+# stdin reads once
+cat "$src" > "$archive"
+
+# pick members before extracting, so a symlink in the archive cannot redirect a
+# later write out of the staging directory
+wanted=()
+while IFS= read -r member; do
+  case "$member" in
+    *..*|*/) echo "skipping $member" >&2 ;;
+    appliance-backup) wanted+=("$member") ;;
+    etc/hostname|etc/hosts|etc/resolv.conf) wanted+=("$member") ;;
+    etc/apt/apt.conf.d/21appliance-auto-upgrades) wanted+=("$member") ;;
+    etc/frr/*[!/]|etc/nftables.d/*[!/]) wanted+=("$member") ;;
+    etc/chrony/*[!/]|etc/snmp/*[!/]|etc/appliance/*[!/]) wanted+=("$member") ;;
+    *) echo "skipping $member" >&2 ;;
+  esac
+done < <(tar --list --gzip --file "$archive")
+
+[[ ${#wanted[@]} -gt 0 ]] || { echo 'nothing to restore' >&2; exit 1; }
+
+tar --extract --gzip --file "$archive" --directory "$stage" \
+  --no-same-owner --no-same-permissions -- "${wanted[@]}"
 [[ -f "$stage/appliance-backup" ]] || { echo 'not an appliance backup' >&2; exit 1; }
 
 # shellcheck source=/dev/null
@@ -22,22 +44,17 @@ from=$(awk -F= '/^variant=/ { print $2 }' "$stage/appliance-backup")
 
 restored=0
 while IFS= read -r -d '' rel; do
-  case "$rel" in
-    appliance-backup) continue ;;
-    etc/hostname|etc/hosts|etc/resolv.conf) ;;
-    etc/frr/*|etc/nftables.d/*|etc/chrony/*|etc/snmp/*|etc/appliance/*) ;;
-    etc/apt/apt.conf.d/21appliance-auto-upgrades) ;;
-    *) echo "skipping $rel" >&2; continue ;;
-  esac
-  install -D -m "$(stat -c %a "$stage/$rel")" "$stage/$rel" "/$rel"
+  [[ "$rel" == appliance-backup ]] && continue
+  install -D -m 0644 "$stage/$rel" "/$rel"
   restored=$((restored + 1))
 done < <(cd "$stage" && find . -type f -printf '%P\0')
 
-# from the image, not the archive
+# modes from the image, not the archive
 chown frr:frr /etc/frr/frr.conf /etc/frr/daemons 2>/dev/null || true
 chmod 0640 /etc/frr/frr.conf /etc/frr/daemons 2>/dev/null || true
 chown root:frrvty /etc/frr/vtysh.conf 2>/dev/null || true
 chmod 0640 /etc/frr/vtysh.conf 2>/dev/null || true
+chmod 0600 /etc/snmp/snmpd.conf 2>/dev/null || true
 
 # bad rules would lock you out
 if ! nft --check --file /etc/nftables.conf; then
