@@ -3,8 +3,11 @@ set -euo pipefail
 variant=${1:?}
 name="frr-appliance-${variant}-amd64"
 
-if [[ -z "${SIGSTORE_ID_TOKEN:-}" ]]; then
-  echo "SIGSTORE_ID_TOKEN not present; skipping keyless signing outside GitLab CI" >&2
+# GitLab hands us a token up front through id_tokens. GitHub Actions tokens live
+# only about five minutes, far less than a build takes, so there cosign fetches a
+# fresh one itself from the OIDC endpoint at the moment it signs.
+if [[ -z "${SIGSTORE_ID_TOKEN:-}" && -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]]; then
+  echo 'No OIDC identity available; skipping keyless signing' >&2
   exit 0
 fi
 export COSIGN_YES=true

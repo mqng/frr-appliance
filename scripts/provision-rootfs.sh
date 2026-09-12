@@ -60,6 +60,11 @@ compgen -G '/var/cache/cracklib/cracklib_dict.*' >/dev/null || {
   exit 1
 }
 
+# The control plane is default-deny, so a typo here does not fail open, it locks
+# the operator out. Validate it now: otherwise the first sign of a mistake is the
+# QEMU smoke test three quarters of the way through a pipeline, or a first boot.
+nft --check --file /etc/nftables.conf
+
 for s in frr-login appliance-firstboot appliance-grow-root appliance-selftest appliance-info appliance-identity; do
   install -m 0755 "/tmp/scripts/$s" "/usr/local/sbin/$s"
 done
@@ -131,9 +136,12 @@ ExecStart=/usr/local/sbin/appliance-grow-root
 WantedBy=multi-user.target
 UNIT
 
-selftest_timeout=240
+# Must exceed the sum of the deadlines in appliance-selftest, otherwise systemd
+# kills the script before it can report which check failed and why. Only the
+# failure path is this slow; a healthy boot signals PASS in well under a minute.
+selftest_timeout=330
 if [[ "$variant" == vpp ]]; then
-  selftest_timeout=360
+  selftest_timeout=450
 fi
 cat > /etc/systemd/system/appliance-selftest.service <<UNIT
 [Unit]

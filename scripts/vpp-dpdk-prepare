@@ -69,9 +69,15 @@ for entry in "${entries[@]}"; do
   selected=$((selected+1))
 done
 
+# VPP worker threads busy-poll their assigned cores. When no interface could be
+# bound to vfio-pci there is nothing to poll, so configuring workers would pin
+# every core at 100% for no reason. That happens on any host without IOMMU, which
+# is a supported fallback here, and it starves the rest of the appliance.
 workers=""
-cpus=$(nproc)
-if (( cpus > 1 )); then workers="1-$((cpus-1))"; fi
+if (( selected > 0 )); then
+  cpus=$(nproc)
+  if (( cpus > 1 )); then workers="1-$((cpus-1))"; fi
+fi
 
 cat > /run/appliance/vpp-startup.conf <<EOF2
 unix {

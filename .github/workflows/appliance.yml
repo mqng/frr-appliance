@@ -106,23 +106,15 @@ jobs:
           SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
           export SOURCE_DATE_EPOCH
 
-          # GitLab supplies SIGSTORE_ID_TOKEN through id_tokens. Mint the
-          # equivalent here and keep it in this step's environment only, so it
-          # never lands in a file on the runner.
-          SIGSTORE_ID_TOKEN=$(curl --fail --silent --show-error \
-            --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-            "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sigstore" | jq -r '.value')
-          [[ -n "$SIGSTORE_ID_TOKEN" && "$SIGSTORE_ID_TOKEN" != null ]] || {
-            echo 'Failed to mint a Sigstore OIDC token' >&2
-            exit 1
-          }
-          echo "::add-mask::$SIGSTORE_ID_TOKEN"
-          export SIGSTORE_ID_TOKEN
-
           # QEMU_ACCEL=kvm only helps if the runner actually exposes /dev/kvm.
           accel=()
           if [[ -e /dev/kvm ]]; then accel=(--device /dev/kvm); fi
 
+          # ACTIONS_ID_TOKEN_REQUEST_* is forwarded rather than a minted token:
+          # an Actions OIDC token is only valid for about five minutes, and
+          # ci/sign-artifacts.sh runs at the very end of the pipeline. cosign
+          # requests its own token from that endpoint when it signs.
+          #
           # --privileged is required, exactly as on GitLab's privileged Docker
           # executor: the image is assembled on loop devices and finalised in a
           # real chroot (ci/lib/loop-image.sh, ci/assemble-image.sh).
@@ -135,7 +127,8 @@ jobs:
             --env QEMU_ACCEL \
             --env PUBLISH_RAW_IMG \
             --env SOURCE_DATE_EPOCH \
-            --env SIGSTORE_ID_TOKEN \
+            --env ACTIONS_ID_TOKEN_REQUEST_URL \
+            --env ACTIONS_ID_TOKEN_REQUEST_TOKEN \
             --env CI_COMMIT_SHA \
             --env CI_PROJECT_URL \
             --env CI_PIPELINE_URL \

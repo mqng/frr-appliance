@@ -16,35 +16,62 @@ exec 3>"$port"
 emit() { printf '%s\n' "$*" >&3; }
 fail() { emit "APPLIANCE_SELFTEST=FAIL variant=$variant check=$1"; exit 1; }
 
+# Report why the last attempt failed. Without this a CI failure only names the
+# check, which is not enough to tell a broken appliance from a slow one.
+detail() {
+  local check=$1 text=${2//$'\n'/ | }
+  emit "APPLIANCE_SELFTEST_DETAIL variant=$variant check=$check: ${text:0:600}"
+}
+
+# systemd reports frr active as soon as watchfrr notifies, but this appliance
+# enables about twenty FRR daemons and vtysh has to reach every one of them. On
+# an emulated CPU that VPP is also busy-polling, that is not instantaneous, so
+# give each check a wall-clock budget rather than a single attempt. This is the
+# same "poll with a hard deadline" approach already used for the service checks.
+await() {
+  local check=$1 budget=$2
+  shift 2
+  local output='' deadline
+  deadline=$(( $(date +%s) + budget ))
+  while :; do
+    if output=$(timeout 10 "$@" 2>&1); then
+      return 0
+    fi
+    (( $(date +%s) < deadline )) || break
+    sleep 1
+  done
+  detail "$check" "$output"
+  fail "$check"
+}
+
+await_active() {
+  local check=$1 unit=$2 budget=$3
+  local deadline
+  deadline=$(( $(date +%s) + budget ))
+  while :; do
+    if systemctl is-active --quiet "$unit"; then
+      return 0
+    fi
+    (( $(date +%s) < deadline )) || break
+    sleep 1
+  done
+  detail "$check" "state=$(systemctl is-active "$unit" 2>&1) result=$(systemctl show -p Result --value "$unit" 2>&1)"
+  fail "$check"
+}
+
 emit "APPLIANCE_BOOT=READY variant=$variant"
 
 # Do not block systemd on FRR ordering; poll it with a hard deadline instead.
-frr_ready=0
-for _ in $(seq 1 180); do
-  if systemctl is-active --quiet frr; then
-    frr_ready=1
-    break
-  fi
-  sleep 1
-done
-[[ $frr_ready -eq 1 ]] || fail frr-service
+await_active frr-service frr 150
 
-timeout 15 vtysh -c 'show version' >/dev/null 2>&1 || fail frr-vtysh
-timeout 15 vtysh -c 'show interface' >/dev/null 2>&1 || fail frr-interface
-sshd -t >/dev/null 2>&1 || fail sshd
-nft --check --file /etc/nftables.conf >/dev/null 2>&1 || fail nftables
+await frr-vtysh 45 vtysh -c 'show version'
+await frr-interface 30 vtysh -c 'show interface'
+await sshd 10 sshd -t
+await nftables 10 nft --check --file /etc/nftables.conf
 
 if [[ "$variant" == vpp ]]; then
-  vpp_ready=0
-  for _ in $(seq 1 120); do
-    if systemctl is-active --quiet vpp; then
-      vpp_ready=1
-      break
-    fi
-    sleep 1
-  done
-  [[ $vpp_ready -eq 1 ]] || fail vpp-service
-  timeout 15 vppctl show version >/dev/null 2>&1 || fail vpp-cli
+  await_active vpp-service vpp 60
+  await vpp-cli 30 vppctl show version
 fi
 
 emit "APPLIANCE_SELFTEST=PASS variant=$variant"

@@ -1,0 +1,19 @@
+Local firewall policy goes here, in files ending in .nft.
+
+/etc/nftables.conf loads /etc/nftables.d/*.nft last, in alphabetical order, so
+rules placed here are appended to the chains it defines. Keeping local policy
+here rather than editing /etc/nftables.conf means an appliance update to the
+shipped policy will not discard it.
+
+The input chain is default-deny, so an added rule only needs to accept:
+
+    # /etc/nftables.d/10-snmp.nft
+    add rule inet appliance input iif "eth0" udp dport 161 accept
+
+To restrict a routing protocol to one interface, drop the broad rule from the
+routing chain in /etc/nftables.conf and add a narrower one here.
+
+Check a change before it takes effect, since a mistake here can close off SSH:
+
+    nft --check --file /etc/nftables.conf
+    systemctl reload nftables

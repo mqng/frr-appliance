@@ -8,10 +8,13 @@ iso="$PWD/out/$name-installer.iso"
 workdir="$PWD/work/$variant/smoke"
 mkdir -p "$workdir"
 
-# VPP may need extra time to initialize DPDK/LCP under software emulation.
-boot_timeout=240
+# VPP may need extra time to initialize DPDK/LCP under software emulation. This
+# is an upper bound, not a wait: boot_wait returns as soon as the guest reports
+# PASS or FAIL. It has to outlast appliance-selftest's own deadlines so that a
+# failing run still delivers its diagnostic instead of being killed mid-test.
+boot_timeout=420
 if [[ "$variant" == vpp ]]; then
-  boot_timeout=360
+  boot_timeout=540
 fi
 
 boot_wait() {
@@ -51,9 +54,11 @@ boot_wait() {
 
   if [[ $ok -ne 1 ]]; then
     echo "$label appliance self-test failed" >&2
-    [[ -s "$result" ]] && { echo '--- result ---' >&2; cat "$result" >&2; }
     echo '--- console ---' >&2
     tail -160 "$log" >&2 || true
+    # Last, so the failing check and its diagnostic are the final lines of the
+    # job log rather than being buried above 160 lines of console output.
+    [[ -s "$result" ]] && { echo '--- result ---' >&2; cat "$result" >&2; }
     return 1
   fi
 }

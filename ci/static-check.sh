@@ -41,6 +41,20 @@ grep -qx 'After=' config/vpp/etc/systemd/system/vpp.service.d/20-appliance.conf 
   echo 'lsblk PARTN is unavailable on bookworm; read the partition number from sysfs' >&2
   exit 1
 }
+# A router must keep forwarding transit traffic by default, but its own control
+# plane is an allowlist. Losing either property silently would be bad.
+grep -q 'hook input priority filter; policy drop' config/common/etc/nftables.conf || {
+  echo 'Appliance control plane must be default-deny' >&2
+  exit 1
+}
+grep -q 'hook forward priority filter; policy accept' config/common/etc/nftables.conf || {
+  echo 'A router must forward by default; transit filtering is operator policy' >&2
+  exit 1
+}
+grep -q 'nft --check --file /etc/nftables.conf' scripts/provision-rootfs.sh || {
+  echo 'Firewall policy is not validated at build time' >&2
+  exit 1
+}
 grep -q 'APPLIANCE_BOOT=READY' scripts/appliance-selftest || { echo 'Boot signal missing' >&2; exit 1; }
 grep -q 'APPLIANCE_SELFTEST=PASS' scripts/appliance-selftest || { echo 'Self-test signal missing' >&2; exit 1; }
 grep -q 'org.frr.appliance.selftest' ci/smoke-test.sh || { echo 'Dedicated smoke-test channel missing' >&2; exit 1; }
