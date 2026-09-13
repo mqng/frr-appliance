@@ -13,7 +13,7 @@ apt-get install -y --no-install-recommends \
   ca-certificates curl debian-keyring debian-archive-keyring gnupg gpgv jq \
   mmdebstrap \
   parted dosfstools e2fsprogs util-linux udev \
-  qemu-utils "${firmware_packages[@]}" \
+  qemu-utils ipxe-qemu "${firmware_packages[@]}" \
   xorriso gzip zstd python3 coreutils file passwd shellcheck
 rm -rf /var/lib/apt/lists/*
 

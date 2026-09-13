@@ -39,7 +39,7 @@ common=(
   -machine "${machine},accel=${QEMU_ACCEL:-tcg}" -cpu "$cpu"
   -display none -serial stdio -monitor none -no-reboot
 )
-net=(-netdev "user,id=n0" -device "virtio-net-pci,netdev=n0,romfile=")
+net=(-netdev "user,id=n0" -device "virtio-net-pci,netdev=n0")
 
 firmware=()
 set_firmware() {
