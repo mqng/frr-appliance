@@ -45,7 +45,9 @@ grep -q 'Pin: origin deb.frrouting.org' config/common/etc/apt/preferences.d/50-f
 grep -q 'nft --check --file /etc/nftables.conf' scripts/appliance-restore || fail 'restore must validate the firewall before reloading'
 ! grep -RInE --exclude='static-check.sh' 'A90FC36D|4A56C773|3D9968AC|BBC9ACA9|9CD45627' scripts ci >/dev/null || fail 'hard-coded repository signer'
 
-grep -qx 'After=' config/vpp/etc/systemd/system/vpp.service.d/20-appliance.conf || fail 'vpp.service must reset After='
+[[ ! -e config/vpp/etc/systemd/system/vpp.service.d ]] || fail 'a drop-in cannot drop After=, override the unit'
+! grep -q 'network.target' config/vpp/etc/systemd/system/vpp.service || fail 'vpp must not be ordered against network.target'
+grep -qx 'ExecStart=/usr/bin/vpp -c /run/appliance/vpp-startup.conf' config/vpp/etc/systemd/system/vpp.service || fail 'vpp must use the generated startup.conf'
 ! grep -RInE --exclude='static-check.sh' '^[^#]*lsblk[^|]*PARTN' ci scripts >/dev/null || fail 'lsblk PARTN is unavailable on bookworm'
 
 grep -q '/usr/local/sbin' config/common/etc/profile.d/99-appliance.sh || fail 'admin PATH lacks sbin'

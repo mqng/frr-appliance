@@ -1,12 +1,16 @@
 [Unit]
-After=
+Description=vector packet processing engine
 Requires=vpp-dpdk-prepare.service
 After=vpp-dpdk-prepare.service
 
 [Service]
-ExecStart=
+Type=simple
 ExecStart=/usr/bin/vpp -c /run/appliance/vpp-startup.conf
+ExecStopPost=/bin/rm -f /dev/shm/db /dev/shm/global_vm /dev/shm/vpe-api
 Restart=on-failure
 RestartSec=2s
 LimitMEMLOCK=infinity
 LimitNOFILE=131072
+
+[Install]
+WantedBy=multi-user.target

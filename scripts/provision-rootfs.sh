@@ -36,10 +36,11 @@ if [[ "$variant" == vpp ]]; then
 
   vpp_unit=$(dpkg -L vpp | grep -E '/systemd/system/vpp\.service$' | head -1 || true)
   [[ -n "$vpp_unit" && -r "$vpp_unit" ]] || { echo 'packaged vpp.service not found' >&2; exit 1; }
-  vpp_extra_after=$(sed -n 's/^After=//p' "$vpp_unit" | tr ' ' '\n' |
-    grep -v -e '^network\.target$' -e '^$' || true)
-  [[ -z "$vpp_extra_after" ]] || {
-    echo "unreviewed ordering in packaged vpp.service: $vpp_extra_after" >&2
+  [[ -s /etc/systemd/system/vpp.service ]] || { echo 'vpp.service override missing' >&2; exit 1; }
+  packaged_start=$(sed -n 's/^ExecStart=//p' "$vpp_unit")
+  [[ "$packaged_start" == '/usr/bin/vpp -c /etc/vpp/startup.conf' ]] || {
+    echo "packaged vpp.service now starts: $packaged_start" >&2
+    echo 'review config/vpp/etc/systemd/system/vpp.service' >&2
     exit 1
   }
 fi

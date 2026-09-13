@@ -52,15 +52,17 @@ await_active() {
   done
   for u in "${related[@]}"; do
     states+=" $u=[$(systemctl show -p LoadState -p UnitFileState -p FragmentPath \
-      -p ActiveState -p Result "$u" 2>&1 | tr '\n' ' ')]"
+      -p DropInPaths -p ActiveState -p Result "$u" 2>&1 | tr '\n' ' ')]"
   done
   detail "$check" "${states# }"
   for u in "${related[@]}"; do
     detail "$check-journal-$u" "$(journalctl -b --no-pager -n 12 -u "$u" 2>&1)"
+    detail "$check-deps-$u" "$(systemctl show -p WantedBy -p RequiredBy -p Requires \
+      -p After "$u" 2>&1 | tr '\n' ' ')"
   done
-  detail "$check-transaction" "$(journalctl -b --no-pager _PID=1 2>&1 |
-    grep -iE 'ordering cycle|deleted to break|dependency|not found|cannot add|failed to load' |
-    tail -n 8)"
+  detail "$check-transaction" "$(journalctl -b --no-pager 2>&1 |
+    grep -iE 'ordering cycle|deleted to break|found dependency|cannot add dependency' |
+    tail -n 12)"
   fail "$check"
 }
 
