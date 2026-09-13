@@ -8,8 +8,9 @@ Configured in vtysh.
 | `vanilla` | Debian 13 | Linux kernel |
 | `vpp` | Debian 12 | [VPP](https://fd.io/) with DPDK, paired to FRR via LCP |
 
-amd64 only. vpp needs an IOMMU and NICs that can bind to vfio-pci, and stays on
-Debian 12 because fd.io publishes no trixie packages.
+vpp needs 4 GB Memory, an IOMMU and NICs that
+can bind to vfio-pci, and uses Debian 12 because fd.io publishes no trixie
+packages.
 
 ## Install
 
@@ -81,6 +82,7 @@ To upgrade: install the new image, run through setup, restore.
 | `IOMMU_REQUIRED` | `1` | Skip NICs when no IOMMU is present |
 | `EXCLUDE_IFACES` | empty | Interface names to keep under Linux |
 | `EXCLUDE_PCI` | empty | PCI addresses to keep under Linux |
+| `HUGEPAGES_MB` | `512` | Hugepages to reserve, once a NIC is bound |
 
 ## Build
 

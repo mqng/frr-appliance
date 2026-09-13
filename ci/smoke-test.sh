@@ -9,8 +9,10 @@ workdir="$PWD/work/$variant/smoke"
 mkdir -p "$workdir"
 
 boot_timeout=420
+mem=2048
 if [[ "$variant" == vpp ]]; then
   boot_timeout=540
+  mem=4096
 fi
 
 boot_wait() {
@@ -68,7 +70,7 @@ boot_wait() {
 
 qemu-img create -q -f qcow2 -F raw -b "$img" "$workdir/bios-overlay.qcow2"
 bios=(
-  -machine "q35,accel=${QEMU_ACCEL:-tcg}" -cpu Nehalem -m 2048 -smp 2
+  -machine "q35,accel=${QEMU_ACCEL:-tcg}" -cpu Nehalem -m "$mem" -smp 2
   -drive "file=$workdir/bios-overlay.qcow2,format=qcow2,if=virtio"
   -netdev "user,id=n0"
   -device "virtio-net-pci,netdev=n0"
@@ -83,7 +85,7 @@ vars=/usr/share/OVMF/OVMF_VARS_4M.ms.fd
 cp "$vars" "$workdir/OVMF_VARS.fd"
 qemu-img create -q -f qcow2 -F raw -b "$img" "$workdir/uefi-overlay.qcow2"
 uefi=(
-  -machine "q35,accel=${QEMU_ACCEL:-tcg}" -cpu Nehalem -m 2048 -smp 2
+  -machine "q35,accel=${QEMU_ACCEL:-tcg}" -cpu Nehalem -m "$mem" -smp 2
   -drive "if=pflash,format=raw,readonly=on,file=$code"
   -drive "if=pflash,format=raw,file=$workdir/OVMF_VARS.fd"
   -drive "file=$workdir/uefi-overlay.qcow2,format=qcow2,if=virtio"
@@ -145,7 +147,7 @@ grep -q 'Done, rebooting' "$write_log" || {
 }
 
 installed=(
-  -machine "q35,accel=${QEMU_ACCEL:-tcg}" -cpu Nehalem -m 2048 -smp 2
+  -machine "q35,accel=${QEMU_ACCEL:-tcg}" -cpu Nehalem -m "$mem" -smp 2
   -drive "file=$workdir/target.qcow2,format=qcow2,if=virtio"
   -netdev "user,id=n0"
   -device "virtio-net-pci,netdev=n0"
