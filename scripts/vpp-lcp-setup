@@ -16,7 +16,7 @@ await() {
   done
 }
 
-await 60 cli_ready || { echo 'vpp CLI never answered' >&2; exit 1; }
+await 30 cli_ready || { echo 'vpp CLI never answered' >&2; exit 1; }
 
 vppctl lcp lcp-sync on
 vppctl lcp lcp-auto-subint on
@@ -25,7 +25,7 @@ map=/run/appliance/vpp-ifaces.tsv
 [[ -r "$map" ]] || exit 0
 while IFS=$'\t' read -r iface _; do
   [[ -n "$iface" ]] || continue
-  await 60 has_interface "$iface" || {
+  await 30 has_interface "$iface" || {
     echo "vpp never created an interface named $iface, it has:" >&2
     vppctl show interface >&2
     exit 1

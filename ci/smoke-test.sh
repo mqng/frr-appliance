@@ -13,6 +13,7 @@ boot_timeout=420
 mem=2048
 if [[ "$variant" == vpp ]]; then
   boot_timeout=540
+  mem=4096
 fi
 
 case "$APPLIANCE_ARCH" in
@@ -38,7 +39,7 @@ common=(
   -machine "${machine},accel=${QEMU_ACCEL:-tcg}" -cpu "$cpu"
   -display none -serial stdio -monitor none -no-reboot
 )
-net=(-netdev "user,id=n0" -device "virtio-net-pci,netdev=n0")
+net=(-netdev "user,id=n0" -device "virtio-net-pci,netdev=n0,romfile=")
 
 firmware=()
 set_firmware() {

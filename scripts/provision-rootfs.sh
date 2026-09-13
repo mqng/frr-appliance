@@ -26,7 +26,7 @@ install -d -m 0755 /etc/appliance /usr/local/sbin /etc/sudoers.d
 
 copy_config() {
   local tree=$1
-  cp -a "$tree/." /etc/
+  cp -a --no-preserve=ownership "$tree/." /etc/
   (cd "$tree" && find . -mindepth 1 -type d -printf '%P\0') |
     while IFS= read -r -d '' path; do chmod go-w "/etc/$path"; done
   (cd "$tree" && find . -type f -printf '%P\0') |

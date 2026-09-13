@@ -49,6 +49,11 @@ chroot "$mnt" dpkg-query -W frr >/dev/null
 chroot "$mnt" dpkg-query -W snmpd >/dev/null
 test -s "$mnt/etc/audit/rules.d/10-appliance.rules"
 grep -q '^disk_full_action' "$mnt/etc/audit/auditd.conf"
+stray=$(find "$mnt/etc" -xdev -uid +999 -print -quit)
+if [[ -n "$stray" ]]; then
+  echo "shipped config is not owned by a system user: $stray" >&2
+  exit 1
+fi
 grep -qx 'agentaddress udp:127.0.0.1:161' "$mnt/etc/snmp/snmpd.conf"
 test -s "$mnt/etc/pmacct/pmacctd.conf"
 [[ ! -e "$mnt/usr/local/sbin/appliance-info" ]]

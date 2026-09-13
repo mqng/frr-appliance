@@ -8,6 +8,7 @@ Before=frr.service
 Type=oneshot
 ExecStart=/usr/local/sbin/vpp-lcp-setup
 RemainAfterExit=yes
+TimeoutStartSec=90
 
 [Install]
 WantedBy=multi-user.target

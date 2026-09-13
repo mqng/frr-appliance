@@ -59,9 +59,11 @@ grep -qx 'ExecStart=/usr/bin/vpp -c /run/appliance/vpp-startup.conf' config/vpp/
 ! grep -rq nr_hugepages config || fail 'hugepages must not be reserved on a box that never binds a NIC'
 grep -q 'nr_hugepages' scripts/vpp-dpdk-prepare || fail 'DPDK needs hugepages once it binds a NIC'
 grep -q 'main-heap-size' scripts/vpp-dpdk-prepare || fail 'vpp defaults to a 1G heap, bound it'
+grep -q '^TimeoutStartSec=' config/vpp/etc/systemd/system/vpp-lcp.service || fail 'a dead dataplane must not hold frr indefinitely'
 
 grep -q '/usr/local/sbin' config/common/etc/profile.d/99-appliance.sh || fail 'admin PATH lacks sbin'
 grep -q 'systemd-journal' scripts/provision-rootfs.sh || fail 'admin cannot read the journal'
+grep -q 'no-preserve=ownership' scripts/provision-rootfs.sh || fail 'shipped config would keep the build user as owner'
 grep -qE '(^| )dbus( |$)' ci/build.sh || fail 'no system bus, systemctl fails for admin'
 grep -q '^kernel.printk' config/common/etc/sysctl.d/99-frr-appliance.conf || fail 'console loglevel not pinned'
 grep -q '^net.ipv4.ping_group_range' config/common/etc/sysctl.d/99-frr-appliance.conf || fail 'admin cannot ping without an unprivileged ICMP socket'
