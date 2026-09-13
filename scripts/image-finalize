@@ -7,6 +7,13 @@ root_uuid=${3:?usage: image-finalize <vanilla|vpp> <disk> <root-uuid>}
 case "$variant" in vanilla|vpp) ;; *) exit 2 ;; esac
 [[ -b "$disk" ]] || { echo "not a block device: $disk" >&2; exit 1; }
 
+arch=$(dpkg --print-architecture)
+case "$arch" in
+  amd64) efi_target=x86_64-efi; efi_fallback=BOOTX64.EFI; serial=ttyS0; bios=yes ;;
+  arm64) efi_target=arm64-efi; efi_fallback=BOOTAA64.EFI; serial=ttyAMA0; bios=no ;;
+  *) echo "unsupported architecture: $arch" >&2; exit 2 ;;
+esac
+
 ldconfig
 found_kernel=0
 for modules in /lib/modules/*; do
@@ -26,7 +33,7 @@ services=(
   ssh nftables chrony auditd apparmor frr
   appliance-identity.service appliance-grow-root.service appliance-selftest.service
   appliance-update-check.timer tmp.mount
-  getty@tty1.service serial-getty@ttyS0.service
+  getty@tty1.service "serial-getty@${serial}.service"
 )
 if [[ "$variant" == vpp ]]; then
   services+=(vpp vpp-dpdk-prepare.service vpp-lcp.service)
@@ -34,17 +41,20 @@ fi
 systemctl enable "${services[@]}"
 
 systemctl disable snmpd.service >/dev/null 2>&1 || true
+systemctl disable pmacctd.service nfacctd.service sfacctd.service >/dev/null 2>&1 || true
 
-grub-install --target=i386-pc --recheck "$disk"
+if [[ "$bios" == yes ]]; then
+  grub-install --target=i386-pc --recheck "$disk"
+fi
 grub-install \
-  --target=x86_64-efi \
+  --target="$efi_target" \
   --efi-directory=/boot/efi \
   --uefi-secure-boot \
   --no-nvram \
   --removable \
   --recheck
 grub-install \
-  --target=x86_64-efi \
+  --target="$efi_target" \
   --efi-directory=/boot/efi \
   --bootloader-id=debian \
   --uefi-secure-boot \
@@ -64,7 +74,7 @@ if grep -Eq 'root=/dev/loop[0-9]+p?[0-9]*' /boot/grub/grub.cfg; then
 fi
 
 test -s /boot/grub/grub.cfg
-test -s /boot/efi/EFI/BOOT/BOOTX64.EFI
+test -s "/boot/efi/EFI/BOOT/$efi_fallback"
 test -s /boot/efi/EFI/BOOT/grub.cfg
 test -s /boot/efi/EFI/debian/grub.cfg
-grep -q 'console=ttyS0,115200n8' /boot/grub/grub.cfg
+grep -q "console=${serial},115200n8" /boot/grub/grub.cfg

@@ -2,12 +2,6 @@
 set -euo pipefail
 
 [[ $(id -u) -eq 0 ]] || { echo "must run as root" >&2; exit 1; }
-install -d -m 0755 /run/appliance
-exec 9>/run/appliance/firstboot.lock
-if ! flock -n 9; then
-  echo 'Setup is waiting for an answer on the other console.' >&2
-  exit 0
-fi
 [[ ! -e /var/lib/appliance/firstboot.done ]] || exit 0
 
 echo

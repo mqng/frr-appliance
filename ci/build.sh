@@ -4,20 +4,26 @@ set -euo pipefail
 variant=${1:?usage: build.sh <vanilla|vpp>}
 source work/base.env
 
-name="frr-appliance-${variant}-amd64"
+name="frr-appliance-${variant}-${APPLIANCE_ARCH}"
 workdir="$PWD/work/$variant"
 outdir="$PWD/out"
 rootfs="$workdir/rootfs.tar"
 mkdir -p "$workdir" "$outdir"
 
+case "$APPLIANCE_ARCH" in
+  amd64) boot_packages=(grub-pc-bin grub-efi-amd64-bin grub-efi-amd64-signed) ;;
+  arm64) boot_packages=(grub-efi-arm64-bin grub-efi-arm64-signed) ;;
+  *) echo "unsupported architecture: $APPLIANCE_ARCH" >&2; exit 2 ;;
+esac
+
 packages=(
-  systemd-sysv linux-image-amd64 initramfs-tools busybox
-  grub2-common grub-pc-bin grub-efi-amd64-bin grub-efi-amd64-signed shim-signed dosfstools
+  systemd-sysv "linux-image-$APPLIANCE_ARCH" initramfs-tools busybox
+  grub2-common "${boot_packages[@]}" shim-signed dosfstools
   openssh-server sudo ca-certificates curl gnupg dbus
   iproute2 ethtool pciutils kmod tcpdump lsof jq less vim-tiny bash-completion
   iputils-ping traceroute dnsutils mtr-tiny debian-security-support
   nftables chrony auditd apparmor apparmor-utils unattended-upgrades
-  libpam-pwquality cracklib-runtime cloud-guest-utils zstd snmpd
+  libpam-pwquality cracklib-runtime cloud-guest-utils zstd snmpd pmacct
 )
 
 include=$(IFS=,; echo "${packages[*]}")
@@ -38,7 +44,7 @@ mmdebstrap \
   --mode=root \
   --format=tar \
   --variant=minbase \
-  --architectures=amd64 \
+  --architectures="$APPLIANCE_ARCH" \
   --components=main \
   --aptopt='Acquire::Languages "none"' \
   --dpkgopt='path-exclude=/usr/share/doc/*' \

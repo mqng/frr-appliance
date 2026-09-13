@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 variant=${1:?}
-name="frr-appliance-${variant}-amd64"
+source work/base.env
+name="frr-appliance-${variant}-${APPLIANCE_ARCH}"
 
 if [[ -z "${SIGSTORE_ID_TOKEN:-}" && -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ]]; then
   echo 'no OIDC identity available, skipping signing' >&2

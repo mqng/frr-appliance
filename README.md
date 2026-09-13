@@ -3,14 +3,16 @@
 Debian images preconfigured as an [FRRouting](https://frrouting.org/) router.
 Configured in vtysh.
 
-| Variant | Base | Dataplane |
-| --- | --- | --- |
-| `vanilla` | Debian 13 | Linux kernel |
-| `vpp` | Debian 12 | [VPP](https://fd.io/) with DPDK, paired to FRR via LCP |
+| Variant | Base | Arch | Dataplane |
+| --- | --- | --- | --- |
+| `vanilla` | Debian 13 | amd64, arm64 | Linux kernel |
+| `vpp` | Debian 12 | amd64 | [VPP](https://fd.io/) with DPDK, paired to FRR via LCP |
 
 vpp needs 4 GB Memory, an IOMMU and NICs that
 can bind to vfio-pci, and uses Debian 12 because fd.io publishes no trixie
 packages.
+
+arm64 is UEFI-only.
 
 ## Install
 
@@ -37,7 +39,7 @@ install security updates automatically. SSH does not work until it has run, sinc
 the account has no password before that.
 
 Later logins go to vtysh. `exit` drops to a shell. `admin` has sudo, and
-`appliance-info` shows the Debian and FRR versions.
+`/etc/appliance/build.env` records the Debian, FRR and VPP versions.
 
 ## Configuration
 
@@ -69,7 +71,8 @@ To upgrade: install the new image, run through setup, restore.
 - `/tmp` on tmpfs, `nosuid`, `nodev`
 - No ICMP redirects or source routing, no unprivileged BPF, restricted `dmesg`,
   `kptr`, `ptrace`
-- `snmpd` installed but disabled
+- `snmpd` and `pmacct` installed but disabled, configured for loopback only, no
+  community string and no flow export until you edit them
 - CycloneDX SBOM, build manifest and SLSA provenance, Sigstore signed
 
 ## Settings
@@ -83,6 +86,7 @@ To upgrade: install the new image, run through setup, restore.
 | `EXCLUDE_IFACES` | empty | Interface names to keep under Linux |
 | `EXCLUDE_PCI` | empty | PCI addresses to keep under Linux |
 | `HUGEPAGES_MB` | `512` | Hugepages to reserve, once a NIC is bound |
+| `MAIN_HEAP_MB` | `256` | VPP main heap, against an upstream default of 1 GB |
 
 ## Build
 

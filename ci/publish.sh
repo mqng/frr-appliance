@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 variant=${1:?}
-name="frr-appliance-${variant}-amd64"
+source work/base.env
+name="frr-appliance-${variant}-${APPLIANCE_ARCH}"
 
 if [[ -z "${CI_API_V4_URL:-}" || -z "${CI_PROJECT_ID:-}" || -z "${CI_JOB_TOKEN:-}" ]]; then
   echo 'no GitLab package registry available, artifacts left in ./out'
@@ -40,8 +41,4 @@ for f in "${files[@]}"; do
     --upload-file "$f" "$base/$b"
 done
 
-cat > "out/publish.env" <<ENV
-PACKAGE_VERSION=$version
-PACKAGE_NAME=$package
-PACKAGE_BASE_URL=$base
-ENV
+

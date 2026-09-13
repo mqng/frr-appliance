@@ -6,6 +6,13 @@ base_iso=${2:?}
 raw_img=${3:?}
 out_iso=${4:?}
 
+source work/base.env
+case "$APPLIANCE_ARCH" in
+  amd64) isolinux=yes ;;
+  arm64) isolinux=no ;;
+  *) echo "unsupported architecture: $APPLIANCE_ARCH" >&2; exit 2 ;;
+esac
+
 # shellcheck source=ci/lib/loop-image.sh
 source ci/lib/loop-image.sh
 
@@ -261,20 +268,30 @@ umount "$mnt"
 losetup -d "$loopdev"
 loopdev=""
 
-xorriso -osirrox on -indev "$base_iso" \
-  -extract /isolinux/txt.cfg "$workdir/txt.cfg.orig" \
-  -extract /boot/grub/grub.cfg "$workdir/grub.cfg.orig" >/dev/null 2>&1
+extract=(-extract /boot/grub/grub.cfg "$workdir/grub.cfg.orig")
+if [[ "$isolinux" == yes ]]; then
+  extract+=(-extract /isolinux/txt.cfg "$workdir/txt.cfg.orig")
+fi
+xorriso -osirrox on -indev "$base_iso" "${extract[@]}" >/dev/null 2>&1
 
-cat > "$workdir/txt.cfg" <<'TXT'
+maps=(
+  -map "$workdir/appliance.img.gz" /appliance/appliance.img.gz
+  -map "$workdir/SHA256SUMS" /appliance/SHA256SUMS
+  -map "$workdir/vmlinuz" /appliance/vmlinuz
+  -map "$workdir/installer-initrd.gz" /appliance/installer-initrd.gz
+)
+
+if [[ "$isolinux" == yes ]]; then
+cat > "$workdir/txt.cfg" <<TXT
 default appliance-vga
 label appliance-vga
   menu label ^Install FRR Appliance (VGA console, ERASE DISK)
   kernel /appliance/vmlinuz
-  append initrd=/appliance/installer-initrd.gz appliance.installer=1 console=ttyS0,115200n8 console=tty0
+  append initrd=/appliance/installer-initrd.gz appliance.installer=1 console=${APPLIANCE_SERIAL},115200n8 console=tty0
 label appliance-serial
   menu label Install FRR Appliance (^Serial console 115200 8N1, ERASE DISK)
   kernel /appliance/vmlinuz
-  append initrd=/appliance/installer-initrd.gz appliance.installer=1 console=tty0 console=ttyS0,115200n8
+  append initrd=/appliance/installer-initrd.gz appliance.installer=1 console=tty0 console=${APPLIANCE_SERIAL},115200n8
 TXT
 cat "$workdir/txt.cfg.orig" >> "$workdir/txt.cfg"
 
@@ -292,7 +309,13 @@ timeout 100
 include txt.cfg
 ISOLINUX
 
-cat > "$workdir/grub.cfg" <<'GRUB'
+  maps+=(
+    -map "$workdir/txt.cfg" /isolinux/txt.cfg
+    -map "$workdir/isolinux.cfg" /isolinux/isolinux.cfg
+  )
+fi
+
+cat > "$workdir/grub.cfg" <<GRUB
 if serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1; then
     terminal_input --append serial
     terminal_output --append serial
@@ -300,17 +323,17 @@ fi
 set default=0
 set timeout=10
 menuentry 'Install FRR Appliance (VGA console, ERASE DISK)' {
-    linux /appliance/vmlinuz appliance.installer=1 console=ttyS0,115200n8 console=tty0
+    linux /appliance/vmlinuz appliance.installer=1 console=${APPLIANCE_SERIAL},115200n8 console=tty0
     initrd /appliance/installer-initrd.gz
 }
 menuentry 'Install FRR Appliance (serial console 115200 8N1, ERASE DISK)' {
-    linux /appliance/vmlinuz appliance.installer=1 console=tty0 console=ttyS0,115200n8
+    linux /appliance/vmlinuz appliance.installer=1 console=tty0 console=${APPLIANCE_SERIAL},115200n8
     initrd /appliance/installer-initrd.gz
 }
 GRUB
 cat "$workdir/grub.cfg.orig" >> "$workdir/grub.cfg"
 
-volid="FRR_${variant^^}_AMD64"
+maps+=(-map "$workdir/grub.cfg" /boot/grub/grub.cfg)
 
 xorriso \
   -abort_on FAILURE \
@@ -319,12 +342,6 @@ xorriso \
   -outdev "$out_iso" \
   -overwrite nondir \
   -mkdir /appliance -- \
-  -volid "$volid" \
-  -map "$workdir/appliance.img.gz" /appliance/appliance.img.gz \
-  -map "$workdir/SHA256SUMS" /appliance/SHA256SUMS \
-  -map "$workdir/vmlinuz" /appliance/vmlinuz \
-  -map "$workdir/installer-initrd.gz" /appliance/installer-initrd.gz \
-  -map "$workdir/txt.cfg" /isolinux/txt.cfg \
-  -map "$workdir/isolinux.cfg" /isolinux/isolinux.cfg \
-  -map "$workdir/grub.cfg" /boot/grub/grub.cfg \
+  -volid "FRR_${variant^^}_${APPLIANCE_ARCH^^}" \
+  "${maps[@]}" \
   -boot_image any replay

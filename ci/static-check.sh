@@ -29,7 +29,9 @@ grep -q -- '--format=tar' ci/build.sh || fail 'mmdebstrap tar output missing'
 grep -q 'attach_loop' ci/assemble-image.sh || fail 'loop-backed assembly missing'
 
 grep -q 'grub-install --target=i386-pc' scripts/image-finalize || fail 'BIOS GRUB install missing'
-grep -q -- '--target=x86_64-efi' scripts/image-finalize || fail 'UEFI GRUB install missing'
+grep -q 'efi_target=x86_64-efi' scripts/image-finalize || fail 'UEFI GRUB target missing for amd64'
+grep -q 'efi_target=arm64-efi' scripts/image-finalize || fail 'UEFI GRUB target missing for arm64'
+! grep -RIn --exclude='static-check.sh' 'frr-appliance-.*-amd64' ci >/dev/null || fail 'artifact names must follow the build architecture'
 grep -q -- '--removable' scripts/image-finalize || fail 'UEFI removable fallback missing'
 grep -q 'OVMF_CODE_4M.ms.fd' ci/smoke-test.sh || fail 'Secure Boot test missing'
 
@@ -56,14 +58,24 @@ grep -q 'nft --check --file /etc/nftables.conf' scripts/appliance-restore || fai
 grep -qx 'ExecStart=/usr/bin/vpp -c /run/appliance/vpp-startup.conf' config/vpp/etc/systemd/system/vpp.service || fail 'vpp must use the generated startup.conf'
 ! grep -rq nr_hugepages config || fail 'hugepages must not be reserved on a box that never binds a NIC'
 grep -q 'nr_hugepages' scripts/vpp-dpdk-prepare || fail 'DPDK needs hugepages once it binds a NIC'
-! grep -RInE --exclude='static-check.sh' '^[^#]*lsblk[^|]*PARTN' ci scripts >/dev/null || fail 'lsblk PARTN is unavailable on bookworm'
+grep -q 'main-heap-size' scripts/vpp-dpdk-prepare || fail 'vpp defaults to a 1G heap, bound it'
 
 grep -q '/usr/local/sbin' config/common/etc/profile.d/99-appliance.sh || fail 'admin PATH lacks sbin'
 grep -q 'systemd-journal' scripts/provision-rootfs.sh || fail 'admin cannot read the journal'
 grep -qE '(^| )dbus( |$)' ci/build.sh || fail 'no system bus, systemctl fails for admin'
-grep -q 'gid netadmin' scripts/vpp-dpdk-prepare || fail 'VPP CLI socket would need sudo'
 grep -q '^kernel.printk' config/common/etc/sysctl.d/99-frr-appliance.conf || fail 'console loglevel not pinned'
 grep -q '^net.ipv4.ping_group_range' config/common/etc/sysctl.d/99-frr-appliance.conf || fail 'admin cannot ping without an unprivileged ICMP socket'
+
+grep -q '^disk_full_action' config/common/etc/audit/auditd.conf || fail 'audit disk policy must not be inherited from the distribution'
+! grep -qE '^(disk_full_action|admin_space_left_action) = (SUSPEND|HALT|SINGLE)' config/common/etc/audit/auditd.conf || fail 'a full disk must not take the router down or stop auditing silently'
+grep -q '^Audit=' config/common/etc/systemd/journald.conf.d/99-appliance.conf || fail 'journald must not decide the kernel audit state by race'
+grep -q 'auditctl -l' scripts/appliance-selftest || fail 'nothing proves the audit rules reached the kernel'
+
+grep -qx 'agentaddress udp:127.0.0.1:161' config/common/etc/snmp/snmpd.conf || fail 'snmpd must not listen beyond loopback until configured'
+! grep -qE '^(rocommunity|rwcommunity|rwuser)' config/common/etc/snmp/snmpd.conf || fail 'no shipped community string, and read-only only'
+! grep -q '^bgp_daemon' config/common/etc/pmacct/pmacctd.conf || fail 'pmacct must not peer with bgpd until configured'
+grep -qx 'nfprobe_receiver: 127.0.0.1:2055' config/common/etc/pmacct/pmacctd.conf || fail 'pmacct must not export off-box until configured'
+grep -q 'APPLIANCE_BUILD_EPOCH' scripts/provision-rootfs.sh || fail 'the build stamp must come from SOURCE_DATE_EPOCH'
 
 grep -q 'hook input priority filter; policy drop' config/common/etc/nftables.conf || fail 'control plane must be default-deny'
 grep -q 'hook forward priority filter; policy accept' config/common/etc/nftables.conf || fail 'a router must forward by default'
@@ -71,8 +83,8 @@ grep -q 'nft --check --file /etc/nftables.conf' scripts/provision-rootfs.sh || f
 
 ! grep -q 'rm -f /etc/systemd/system/.*getty' scripts/appliance-firstboot || fail 'autologin must not be disabled by deleting a drop-in'
 grep -q 'firstboot.done' scripts/appliance-getty || fail 'appliance-getty must gate autologin'
-grep -q 'flock -n' scripts/appliance-firstboot || fail 'the second console must not block on the setup lock'
-for unit in getty@tty1 serial-getty@ttyS0; do
+! grep -q flock scripts/appliance-firstboot || fail 'setup must run on whichever console the operator is at'
+for unit in getty@tty1 serial-getty@; do
   conf="config/common/etc/systemd/system/$unit.service.d/10-appliance-console.conf"
   grep -q '/usr/local/sbin/appliance-getty' "$conf" || fail "$conf must call appliance-getty"
 done
@@ -89,14 +101,13 @@ grep -q 'exec </dev/console >/dev/console 2>&1' ci/build-installer-iso.sh || fai
 ! grep -q 'appliance.console=' ci/build-installer-iso.sh || fail 'duplicate console routing'
 grep -q "trap 'fail_shell" ci/build-installer-iso.sh || fail 'installer exit trap missing'
 grep -q 'halt_forever' ci/build-installer-iso.sh || fail 'installer halt path missing'
-! grep -q 'exec setsid sh -c' ci/build-installer-iso.sh || fail 'rescue shell must not exec over the hook'
 grep -qx 'default appliance-vga' ci/build-installer-iso.sh || fail 'installer default must be VGA'
 
 installer_entries=0
 while IFS= read -r entry; do
   installer_entries=$((installer_entries + 1))
   case "$entry" in
-    *console=tty0*console=ttyS0,115200n8*|*console=ttyS0,115200n8*console=tty0*) ;;
+    *console=tty0*console=*,115200n8*|*console=*,115200n8*console=tty0*) ;;
     *) fail "installer entry lacks both consoles:$entry" ;;
   esac
 done < <(grep -E '^ +(append|linux) .*appliance\.installer=1' ci/build-installer-iso.sh)

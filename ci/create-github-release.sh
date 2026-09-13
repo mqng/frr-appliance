@@ -21,19 +21,22 @@ fi
 env_value() { grep -m1 "^$2=" "$1" | cut -d= -f2-; }
 
 assets=()
-variants=()
+builds=()
 rows=""
-for variant in vanilla vpp; do
-  name="frr-appliance-${variant}-amd64"
-  [[ -f "out/$name-SHA256SUMS" ]] || continue
-  variants+=("$variant")
+for sums in out/frr-appliance-*-SHA256SUMS; do
+  [[ -f "$sums" ]] || continue
+  name=$(basename "$sums" -SHA256SUMS)
+  target=${name#frr-appliance-}
+  variant=${target%-*}
+  arch=${target##*-}
+  builds+=("$target")
 
   build_env="out/$name-build.env"
   if [[ -r "$build_env" ]]; then
     vpp_version=$(env_value "$build_env" VPP_VERSION)
     [[ "$vpp_version" != none ]] || vpp_version=-
-    rows+=$(printf '| %s | %s (%s) | %s (%s) | %s |\n' \
-      "$variant" \
+    rows+=$(printf '| %s | %s | %s (%s) | %s (%s) | %s |\n' \
+      "$variant" "$arch" \
       "$(env_value "$build_env" DEBIAN_VERSION)" \
       "$(env_value "$build_env" DEBIAN_CODENAME)" \
       "$(env_value "$build_env" FRR_VERSION)" \
@@ -67,23 +70,24 @@ for variant in vanilla vpp; do
   done
 done
 
-[[ ${#variants[@]} -gt 0 ]] || { echo 'no build output in ./out' >&2; exit 1; }
+[[ ${#builds[@]} -gt 0 ]] || { echo 'no build output in ./out' >&2; exit 1; }
+example="frr-appliance-${builds[0]}"
 
 notes=$(mktemp)
 trap 'rm -f "$notes"' EXIT
 cat > "$notes" <<NOTES
 FRR appliance build from [run $GITHUB_RUN_NUMBER]($run_url), commit \`$GITHUB_SHA\`.
 
-| Variant | Debian | FRR | VPP |
-| --- | --- | --- | --- |
+| Variant | Arch | Debian | FRR | VPP |
+| --- | --- | --- | --- | --- |
 $rows
 Verify the checksums and signatures before use:
 
 \`\`\`
-sha256sum --check --ignore-missing frr-appliance-vanilla-amd64-SHA256SUMS
+sha256sum --check --ignore-missing $example-SHA256SUMS
 
-cosign verify-blob frr-appliance-vanilla-amd64.img.zst \\
-  --bundle frr-appliance-vanilla-amd64.img.zst.sigstore.json \\
+cosign verify-blob $example.img.zst \\
+  --bundle $example.img.zst.sigstore.json \\
   --certificate-identity-regexp "^${GITHUB_SERVER_URL:-https://github.com}/$GITHUB_REPOSITORY/" \\
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 \`\`\`

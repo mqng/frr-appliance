@@ -1,11 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-for _ in $(seq 1 60); do
-  if vppctl show version >/dev/null 2>&1; then break; fi
-  sleep 1
-done
-vppctl show version >/dev/null
+cli_ready() { vppctl show version >/dev/null 2>&1; }
+has_interface() { vppctl show interface 2>/dev/null | grep -qw "$1"; }
+has_pair() { vppctl show lcp 2>/dev/null | grep -qw "$1"; }
+
+await() {
+  local budget=$1
+  shift
+  local deadline=$(( $(date +%s) + budget ))
+  while :; do
+    "$@" && return 0
+    (( $(date +%s) < deadline )) || return 1
+    sleep 1
+  done
+}
+
+await 60 cli_ready || { echo 'vpp CLI never answered' >&2; exit 1; }
+
 vppctl lcp lcp-sync on
 vppctl lcp lcp-auto-subint on
 
@@ -13,8 +25,16 @@ map=/run/appliance/vpp-ifaces.tsv
 [[ -r "$map" ]] || exit 0
 while IFS=$'\t' read -r iface _; do
   [[ -n "$iface" ]] || continue
-  if ! vppctl show lcp 2>/dev/null | grep -Fq "$iface"; then
-    vppctl lcp create "$iface" host-if "$iface"
-  fi
-  vppctl set interface state "$iface" up || true
+  await 60 has_interface "$iface" || {
+    echo "vpp never created an interface named $iface, it has:" >&2
+    vppctl show interface >&2
+    exit 1
+  }
+  has_pair "$iface" || vppctl lcp create "$iface" host-if "$iface"
+  has_pair "$iface" || {
+    echo "lcp create did not pair $iface:" >&2
+    vppctl show lcp >&2
+    exit 1
+  }
+  vppctl set interface state "$iface" up
 done < "$map"

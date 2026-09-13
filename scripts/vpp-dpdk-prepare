@@ -9,6 +9,7 @@ IOMMU_REQUIRED=${IOMMU_REQUIRED:-1}
 EXCLUDE_IFACES=${EXCLUDE_IFACES:-}
 EXCLUDE_PCI=${EXCLUDE_PCI:-}
 HUGEPAGES_MB=${HUGEPAGES_MB:-512}
+MAIN_HEAP_MB=${MAIN_HEAP_MB:-256}
 
 install -d -m 0755 /run/appliance
 map=/run/appliance/vpp-ifaces.tsv
@@ -114,6 +115,9 @@ unix {
   log /var/log/vpp/vpp.log
   cli-listen /run/vpp/cli.sock
   gid netadmin
+}
+memory {
+  main-heap-size ${MAIN_HEAP_MB}M
 }
 api-trace {
   on

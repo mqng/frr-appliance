@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 variant=${1:?}
-name="frr-appliance-${variant}-amd64"
-img="$PWD/out/$name.img"
-
 source work/base.env
+name="frr-appliance-${variant}-${APPLIANCE_ARCH}"
+img="$PWD/out/$name.img"
 
 # shellcheck source=ci/lib/loop-image.sh
 source ci/lib/loop-image.sh
@@ -28,10 +27,8 @@ umount "$mnt"
 losetup -d "$loopdev"
 loopdev=""
 
-set -a
 # shellcheck source=/dev/null
 source "out/$name-build.env"
-set +a
 python3 ci/make-sbom.py "out/$name-packages.txt" "out/$name-sbom.cdx.json" "$variant"
 jq -e '.bomFormat == "CycloneDX" and (.components | length) > 100
        and all(.components[]; .name != null and .version != null and .purl != null)' \
@@ -47,13 +44,13 @@ base_iso_url=$(jq -r '.installer_iso_source + "/" + .installer_iso' out/base-sou
 base_iso_sha512=$(jq -r '.installer_iso_sha512' out/base-source.json)
 
 jq -n \
-  --arg variant "$variant" --arg build_time "$APPLIANCE_BUILD_TIME" \
+  --arg variant "$variant" --arg arch "$APPLIANCE_ARCH" --arg build_time "$APPLIANCE_BUILD_TIME" \
   --arg frr "$FRR_VERSION" --arg vpp "$VPP_VERSION" \
   --arg frr_key "$FRR_KEYRING_SHA256" --arg vpp_key "$VPP_KEYRING_SHA256" \
   --arg commit "${CI_COMMIT_SHA:-local}" --arg pipeline "${CI_PIPELINE_URL:-local}" --arg runner "${CI_RUNNER_DESCRIPTION:-local}" \
   --arg img "$img_sha" --arg zst "$zst_sha" --arg qcow "$qcow_sha" --arg iso "$iso_sha" --arg packages "$packages_sha" \
   --argjson base "$source_json" \
-  '{schema:1,variant:$variant,build_time:$build_time,base:$base,versions:{frr:$frr,vpp:$vpp},repository_keys:{frr_sha256:$frr_key,vpp_sha256:$vpp_key},git:{commit:$commit},ci:{pipeline:$pipeline,runner:$runner},artifacts:{img:{sha256:$img},img_zst:{sha256:$zst},qcow2:{sha256:$qcow},installer_iso:{sha256:$iso},package_inventory:{sha256:$packages}}}' \
+  '{schema:1,variant:$variant,arch:$arch,build_time:$build_time,base:$base,versions:{frr:$frr,vpp:$vpp},repository_keys:{frr_sha256:$frr_key,vpp_sha256:$vpp_key},git:{commit:$commit},ci:{pipeline:$pipeline,runner:$runner},artifacts:{img:{sha256:$img},img_zst:{sha256:$zst},qcow2:{sha256:$qcow},installer_iso:{sha256:$iso},package_inventory:{sha256:$packages}}}' \
   > "out/$name-build-manifest.json"
 
 jq -n \

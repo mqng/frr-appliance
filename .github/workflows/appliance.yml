@@ -47,7 +47,7 @@ jobs:
   build:
     needs: lint
     if: github.event_name != 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-latest' }}
     timeout-minutes: 180
     permissions:
       contents: read
@@ -56,8 +56,12 @@ jobs:
       fail-fast: false
       matrix:
         variant: ${{ fromJSON(github.event.inputs.variants == 'vanilla' && '["vanilla"]' || github.event.inputs.variants == 'vpp' && '["vpp"]' || '["vanilla","vpp"]') }}
+        arch: [amd64, arm64]
+        exclude:
+          - variant: vpp
+            arch: arm64
     concurrency:
-      group: frr-appliance-${{ matrix.variant }}
+      group: frr-appliance-${{ matrix.variant }}-${{ matrix.arch }}
       cancel-in-progress: false
     env:
       APPLIANCE_VARIANT: ${{ matrix.variant }}
@@ -65,7 +69,7 @@ jobs:
       CI_COMMIT_SHA: ${{ github.sha }}
       CI_PROJECT_URL: ${{ github.server_url }}/${{ github.repository }}
       CI_PIPELINE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-      CI_RUNNER_DESCRIPTION: github-hosted ubuntu-latest
+      CI_RUNNER_DESCRIPTION: github-hosted ${{ matrix.arch }}
     steps:
       - uses: actions/checkout@v4
 
@@ -121,7 +125,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: metadata-${{ matrix.variant }}
+          name: metadata-${{ matrix.variant }}-${{ matrix.arch }}
           retention-days: 7
           if-no-files-found: warn
           path: |
@@ -137,7 +141,7 @@ jobs:
       - name: Upload release payload
         uses: actions/upload-artifact@v4
         with:
-          name: release-payload-${{ matrix.variant }}
+          name: release-payload-${{ matrix.variant }}-${{ matrix.arch }}
           retention-days: 1
           compression-level: 0
           if-no-files-found: error

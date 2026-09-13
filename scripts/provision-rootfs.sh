@@ -3,6 +3,13 @@ set -euo pipefail
 
 variant=${1:?usage: provision-rootfs.sh <vanilla|vpp>}
 case "$variant" in vanilla|vpp) ;; *) exit 2 ;; esac
+
+arch=$(dpkg --print-architecture)
+case "$arch" in
+  amd64) serial_console=ttyS0 ;;
+  arm64) serial_console=ttyAMA0 ;;
+  *) echo "unsupported architecture: $arch" >&2; exit 2 ;;
+esac
 export DEBIAN_FRONTEND=noninteractive
 
 umask 0022
@@ -55,7 +62,7 @@ compgen -G '/var/cache/cracklib/cracklib_dict.*' >/dev/null || {
 nft --check --file /etc/nftables.conf
 
 for s in frr-login appliance-getty appliance-firstboot appliance-grow-root \
-         appliance-selftest appliance-info appliance-identity appliance-update-check \
+         appliance-selftest appliance-identity appliance-update-check \
          appliance-backup appliance-restore; do
   install -m 0755 "/tmp/scripts/$s" "/usr/local/sbin/$s"
 done
@@ -122,7 +129,7 @@ else
   cmdline_default=""
 fi
 cat > /etc/default/grub.d/99-appliance.cfg <<GRUB
-GRUB_CMDLINE_LINUX="console=tty0 console=ttyS0,115200n8 audit=1 audit_backlog_limit=8192"
+GRUB_CMDLINE_LINUX="console=tty0 console=${serial_console},115200n8 audit=1 audit_backlog_limit=8192"
 GRUB_CMDLINE_LINUX_DEFAULT="$cmdline_default"
 GRUB_TERMINAL="console serial"
 GRUB_SERIAL_COMMAND="serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1"
@@ -136,7 +143,7 @@ virtio_console
 ext4
 MODULES
 
-build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+build_time=$(date -u -d "@${APPLIANCE_BUILD_EPOCH:-$(date +%s)}" +%Y-%m-%dT%H:%M:%SZ)
 frr_version=$(dpkg-query -W -f='${Version}' frr)
 frr_channel=$(awk -F': ' '/^Components:/{print $2}' /etc/apt/sources.list.d/frr.sources)
 vpp_version=none

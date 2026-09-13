@@ -57,8 +57,6 @@ await_active() {
   detail "$check" "${states# }"
   for u in "${related[@]}"; do
     detail "$check-journal-$u" "$(journalctl -b --no-pager -n 12 -u "$u" 2>&1)"
-    detail "$check-deps-$u" "$(systemctl show -p WantedBy -p RequiredBy -p Requires \
-      -p After "$u" 2>&1 | tr '\n' ' ')"
   done
   detail "$check-transaction" "$(journalctl -b --no-pager 2>&1 |
     grep -iE 'ordering cycle|deleted to break|found dependency|cannot add dependency' |
@@ -74,10 +72,12 @@ await frr-interface 30 vtysh -c 'show interface'
 await sshd 10 sshd -t
 await nftables 10 nft --check --file /etc/nftables.conf
 await ping-as-admin 10 runuser -u admin -- ping -c 1 -W 2 127.0.0.1
+await_active auditd-service auditd 30
+await audit-rules 15 sh -c 'auditctl -l | grep -q identity'
 
 testnet=198.51.100.0/24
-await route-config 15 vtysh -c 'configure terminal' -c "ip route $testnet blackhole" -c 'end'
-await route-install 60 sh -c "ip route show $testnet | grep -q blackhole || {
+await route-install 45 sh -c "vtysh -c 'configure terminal' -c 'ip route $testnet blackhole' -c 'end' >/dev/null
+ip route show $testnet | grep -q blackhole || {
   ip route show $testnet
   vtysh -c 'show ip route $testnet'
   exit 1
