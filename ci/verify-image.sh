@@ -46,6 +46,11 @@ grep -q 'audit=1' "$mnt/boot/grub/grub.cfg"
 grep -q 'APT::Periodic::Unattended-Upgrade "0"' "$mnt/etc/apt/apt.conf.d/20auto-upgrades"
 [[ ! -e "$mnt/etc/apt/apt.conf.d/21appliance-auto-upgrades" ]]
 
+test -e "$mnt/etc/motd"
+[[ ! -s "$mnt/etc/motd" ]]
+grep -q 'FRR appliance' "$mnt/etc/issue"
+! compgen -G "$mnt/etc/update-motd.d/*" >/dev/null
+
 test -s "$mnt/etc/apt/preferences.d/50-frr"
 holds=$(chroot "$mnt" dpkg --get-selections | awk '$2 == "hold" { print $1 }')
 if grep -qx frr <<<"$holds"; then

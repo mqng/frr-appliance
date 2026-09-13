@@ -26,6 +26,7 @@ copy_config() {
     while IFS= read -r -d '' path; do chmod go-w,a-x "/etc/$path"; done
 }
 copy_config /tmp/config/common/etc
+rm -f /etc/update-motd.d/*
 
 if [[ ! -e /usr/lib/systemd/system/tmp.mount && -e /usr/share/systemd/tmp.mount ]]; then
   install -m 0644 /usr/share/systemd/tmp.mount /etc/systemd/system/tmp.mount

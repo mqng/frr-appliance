@@ -2,6 +2,8 @@
 Description=vector packet processing engine
 Requires=vpp-dpdk-prepare.service
 After=vpp-dpdk-prepare.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple

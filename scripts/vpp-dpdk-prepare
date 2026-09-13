@@ -8,6 +8,7 @@ MODE=${MODE:-all}
 IOMMU_REQUIRED=${IOMMU_REQUIRED:-1}
 EXCLUDE_IFACES=${EXCLUDE_IFACES:-}
 EXCLUDE_PCI=${EXCLUDE_PCI:-}
+HUGEPAGES_MB=${HUGEPAGES_MB:-512}
 
 install -d -m 0755 /run/appliance
 map=/run/appliance/vpp-ifaces.tsv
@@ -15,6 +16,19 @@ map=/run/appliance/vpp-ifaces.tsv
 
 excluded_iface() { [[ " $EXCLUDE_IFACES " == *" $1 "* ]]; }
 excluded_pci() { [[ " $EXCLUDE_PCI " == *" $1 "* ]]; }
+
+pci_bdf() {
+  local dev=$1 base
+  while [[ "$dev" == /sys/devices/pci* ]]; do
+    base=${dev##*/}
+    if [[ "$base" =~ ^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$ ]]; then
+      printf '%s' "$base"
+      return 0
+    fi
+    dev=${dev%/*}
+  done
+  return 1
+}
 
 has_iommu=0
 compgen -G '/sys/kernel/iommu_groups/*' >/dev/null && has_iommu=1
@@ -26,9 +40,14 @@ if [[ "$MODE" == all ]]; then
     iface=${path##*/}
     [[ "$iface" == lo ]] && continue
     dev=$(readlink -f "$path/device" 2>/dev/null || true)
-    [[ "$dev" == /sys/devices/pci* ]] || continue
-    pci=${dev##*/}
-    [[ "$pci" =~ ^[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-7]$ ]] || continue
+    if [[ "$dev" != /sys/devices/pci* ]]; then
+      logger -t vpp-dpdk-prepare "not a PCI device: leaving $iface under Linux"
+      continue
+    fi
+    pci=$(pci_bdf "$dev") || {
+      logger -t vpp-dpdk-prepare "no PCI address for $iface, leaving it under Linux"
+      continue
+    }
     excluded_iface "$iface" && continue
     excluded_pci "$pci" && continue
     if [[ "$IOMMU_REQUIRED" == 1 && $has_iommu -ne 1 ]]; then
@@ -69,6 +88,19 @@ for entry in "${entries[@]}"; do
   printf '%s\t%s\n' "$iface" "$pci" >> "$map"
   selected=$((selected+1))
 done
+
+if (( selected > 0 )); then
+  page_kb=$(awk '/^Hugepagesize:/ { print $2 }' /proc/meminfo)
+  if [[ -n "$page_kb" ]] && (( page_kb > 0 )); then
+    want=$(( HUGEPAGES_MB * 1024 / page_kb ))
+    (( want > 0 )) || want=1
+    if (( $(< /proc/sys/vm/nr_hugepages) < want )); then
+      echo "$want" > /proc/sys/vm/nr_hugepages || true
+    fi
+    got=$(< /proc/sys/vm/nr_hugepages)
+    (( got >= want )) || logger -t vpp-dpdk-prepare "reserved $got of $want hugepages"
+  fi
+fi
 
 workers=""
 if (( selected > 0 )); then

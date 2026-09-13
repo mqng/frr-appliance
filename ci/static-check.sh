@@ -41,6 +41,12 @@ grep -qE '^channel=frr-[0-9]+\.[0-9]+$' scripts/install-frr.sh || fail 'FRR must
 grep -q 'Pin: origin deb.frrouting.org' config/common/etc/apt/preferences.d/50-frr || fail 'FRR is not pinned to its own repo'
 ! grep -q 'apt-mark hold frr' scripts/provision-rootfs.sh || fail 'holding frr hides patch releases'
 
+! grep -qi debian config/common/etc/issue || fail 'the login banner must not name the distribution'
+grep -q 'rm -f /etc/update-motd.d' scripts/provision-rootfs.sh || fail 'the dynamic motd still adds a kernel line'
+test -e config/common/etc/motd || fail 'an empty motd must ship to replace the debian one'
+[[ ! -s config/common/etc/motd ]] || fail 'vtysh already greets, a second banner is noise'
+! grep -q 'FRR appliance' scripts/frr-login || fail 'vtysh already greets, a second banner is noise'
+
 ! grep -qE 'etc/(shadow|gshadow|ssh/ssh_host|sudoers)' scripts/appliance-backup || fail 'backup must not include credentials'
 grep -q 'nft --check --file /etc/nftables.conf' scripts/appliance-restore || fail 'restore must validate the firewall before reloading'
 ! grep -RInE --exclude='static-check.sh' 'A90FC36D|4A56C773|3D9968AC|BBC9ACA9|9CD45627' scripts ci >/dev/null || fail 'hard-coded repository signer'
@@ -48,6 +54,8 @@ grep -q 'nft --check --file /etc/nftables.conf' scripts/appliance-restore || fai
 [[ ! -e config/vpp/etc/systemd/system/vpp.service.d ]] || fail 'a drop-in cannot drop After=, override the unit'
 ! grep -q 'network.target' config/vpp/etc/systemd/system/vpp.service || fail 'vpp must not be ordered against network.target'
 grep -qx 'ExecStart=/usr/bin/vpp -c /run/appliance/vpp-startup.conf' config/vpp/etc/systemd/system/vpp.service || fail 'vpp must use the generated startup.conf'
+! grep -rq nr_hugepages config || fail 'hugepages must not be reserved on a box that never binds a NIC'
+grep -q 'nr_hugepages' scripts/vpp-dpdk-prepare || fail 'DPDK needs hugepages once it binds a NIC'
 ! grep -RInE --exclude='static-check.sh' '^[^#]*lsblk[^|]*PARTN' ci scripts >/dev/null || fail 'lsblk PARTN is unavailable on bookworm'
 
 grep -q '/usr/local/sbin' config/common/etc/profile.d/99-appliance.sh || fail 'admin PATH lacks sbin'
@@ -55,6 +63,7 @@ grep -q 'systemd-journal' scripts/provision-rootfs.sh || fail 'admin cannot read
 grep -qE '(^| )dbus( |$)' ci/build.sh || fail 'no system bus, systemctl fails for admin'
 grep -q 'gid netadmin' scripts/vpp-dpdk-prepare || fail 'VPP CLI socket would need sudo'
 grep -q '^kernel.printk' config/common/etc/sysctl.d/99-frr-appliance.conf || fail 'console loglevel not pinned'
+grep -q '^net.ipv4.ping_group_range' config/common/etc/sysctl.d/99-frr-appliance.conf || fail 'admin cannot ping without an unprivileged ICMP socket'
 
 grep -q 'hook input priority filter; policy drop' config/common/etc/nftables.conf || fail 'control plane must be default-deny'
 grep -q 'hook forward priority filter; policy accept' config/common/etc/nftables.conf || fail 'a router must forward by default'
@@ -62,6 +71,7 @@ grep -q 'nft --check --file /etc/nftables.conf' scripts/provision-rootfs.sh || f
 
 ! grep -q 'rm -f /etc/systemd/system/.*getty' scripts/appliance-firstboot || fail 'autologin must not be disabled by deleting a drop-in'
 grep -q 'firstboot.done' scripts/appliance-getty || fail 'appliance-getty must gate autologin'
+grep -q 'flock -n' scripts/appliance-firstboot || fail 'the second console must not block on the setup lock'
 for unit in getty@tty1 serial-getty@ttyS0; do
   conf="config/common/etc/systemd/system/$unit.service.d/10-appliance-console.conf"
   grep -q '/usr/local/sbin/appliance-getty' "$conf" || fail "$conf must call appliance-getty"

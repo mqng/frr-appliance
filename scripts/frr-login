@@ -9,13 +9,17 @@ fi
 if [[ ! -e /var/lib/appliance/firstboot.done ]]; then
   sudo /usr/local/sbin/appliance-firstboot || true
 fi
+if [[ -t 1 && ! -e /var/lib/appliance/firstboot.done ]]; then
+  echo 'Setup did not finish, so this console still logs in without a password.'
+  echo 'Run: sudo appliance-firstboot'
+  echo
+fi
 
 if [[ -t 1 ]]; then
   if [[ -s /var/lib/appliance/updates ]]; then
     cat /var/lib/appliance/updates
     echo
   fi
-  echo "FRR appliance. Type exit to leave the CLI."
 fi
 vtysh || true
 
